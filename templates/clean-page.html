@@ -1,0 +1,17 @@
+{% extends "after-dark/templates/index.html" %}
+
+{% block content %}
+    {% block header %}
+        {{ super() }}
+    {% endblock header %}
+
+<article itemscope itemtype="http://schema.org/BlogPosting">
+    <header>
+        <h1 itemprop="headline">{{ page.title }}</h1>
+    </header>
+    <div itemprop="articleBody">
+      {{ page.content | safe }}
+    </div>
+</article>
+
+{% endblock content %}
