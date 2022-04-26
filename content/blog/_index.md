@@ -1,6 +1,4 @@
 +++
-title = "Blog"
+title = "Audun Halland"
 page_template = "blog-post.html"
 +++
-
-Hi, I'm Audun
