@@ -1,6 +1,9 @@
 +++
 title = "The first blog post"
 date = 2022-04-25
+[taxonomies]
+categories = ["Features"]
+tags = ["Markdown"]
 +++
 
 I decided to create a BLOG, and this is the first post in the blog.

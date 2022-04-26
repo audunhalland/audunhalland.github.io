@@ -22,7 +22,10 @@ When I'm not doing that, I'm likely doing one of the following things:
 
 I'm sure there are other things I could be doing as well.
 
-# This website
+## This website
 On the 25th of April, 2022 I finally pulled myself together and decided to create a blog.
 
 It was built with [Zola](https://www.getzola.org/).
+
+## Contact
+You can contact me at [audun.halland@pm.me](mailto:audun.halland@pm.me).
