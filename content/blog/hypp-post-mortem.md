@@ -11,7 +11,7 @@ called [Hypp](https://github.com/audunhalland/hypp). It takes inspiration from
 Svelte, and uses a complex procedural macro to define components.
 
 I wanted to design a syntax that is a hybrid of HTML and Rust code,
-and I think it succeds and some things and fails at others.
+and I think it succeds at some things and fails at others.
 
 A code example taken from its `tests` directory:
 
