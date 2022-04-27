@@ -164,7 +164,7 @@ menu = [
     { name = "Blog", url = "/blog/" },
     { name = "About", url = "/about/" },
     { name = "Resume", url = "/resume/" },
-    { name = "Github", url = "https:/github.com/audunhalland" },
+    { name = "Github", url = "https://github.com/audunhalland" },
 ]
 # Avatar at homepage
 avatar_url = ""
