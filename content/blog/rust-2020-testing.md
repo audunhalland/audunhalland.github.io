@@ -12,7 +12,7 @@ Unit testing. Becoming a master of any programming language totally depends on a
 
 Before our team chose to develop a new application using Rust, I had some experience using various degrees of test driven development styles in Python, Spring Boot (JUnit) and node.js (jest). I am by no means an expert at test writing, having adopted this style of development only the last 2–3 years. Projects I worked on before that did not rely as much on TDD, but more on “stunt programming” — let’s just say that I try to be a good professional now.
 
-In this article I’ll write a little about the way I currently think about testing, and then about implementing these ideas in Rust. TL;DR: Not everything works as smoothly as when working with higher level languages, maybe unsurprisingly.
+In this article I’ll write a little about the way I currently think about testing, and then about implementing these ideas in Rust. **TL;DR**: Not everything works as smoothly as when working with higher level languages, maybe unsurprisingly.
 
 
 ### Code decoupling
@@ -146,7 +146,7 @@ fn test() {
 }
 ```
 
-but it’s not as elegant as having a single matching expression for the whole type that I’m testing. But what if there was a macro for matching only what I care about? Let’s try the assert_matches! macro from the matches crate, a macro that makes it possible to assert that something matches a pattern similar to a match expression:
+but it’s not as elegant as having a single matching expression for the whole type that I’m testing. But what if there was a macro for matching only what I care about? Let’s try the `assert_matches!` macro from the `matches` crate, a macro that makes it possible to assert that something matches a pattern similar to a match expression:
 
 ```rust
 #[test]
