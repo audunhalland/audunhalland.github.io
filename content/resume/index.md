@@ -14,10 +14,11 @@ template = "clean-page.html"
 
 ##### [2014 - 2017] Software Developer, _Opera Software_
 
-- Develop and architect various web-based solutions for different customers.
-- Full stack web development
-- Main technologies used: React/TypeScript, Spring/Kotlin, Rust, PostgreSQL, AWS/Google Cloud, Kubernetes/Docker, microservices, GraphQL
-- Designed and developed an innovative Rust-based search engine for legal documents
+- Developed _Opera Max_ for Android, a data savings manager/internet privacy application
+- Android development in Java. User interface, network communication, SQLite database and lots of phone state monitoring
+- Development of complex networking code (C++/linux APIs + JNI interface) for the VPN component
+- Focus on SDK backwards compatibility. Wrote gradle build scripts to replace deprecated Eclipse/ant
+- Largest task yet is moving the whole client/server architecture from a simple HTTP protocol to a multiplexing and fully encrypted HTTP2/SPDY based protocol. Designed and wrote a multithreaded Java utility library to facilitate the new protocol in all parts of the application, using a raw Java Socket internally
 
 ##### [2014 - 2014] Volunteer Developer, _Norwegian Helsinki Committee_
 
