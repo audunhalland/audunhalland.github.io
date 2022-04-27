@@ -122,5 +122,5 @@ A project like this can never really be "done" because its
 scope is very hard to define. To take it somewhere remotely close to production quality
 is way too big a task for a hobby project developed during the night.
 
-It was (almost too much) fun while it lasted. My next projects will try have a more
+It was (almost too much) fun while it lasted. My next projects will try to have a more
 focused scope.
