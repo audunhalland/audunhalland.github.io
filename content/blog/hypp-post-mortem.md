@@ -92,7 +92,7 @@ In the end though, I think I refactored the code so the fix wasn't necessary for
 But I can definitely say that Hypp directly lead to actual improvements in the Rust language!
 
 ### What didn't work so well
-#### To much macroifization
+#### Too much macroifization
 I don't like that everything has to be inside one big macro. But I think it needs to,
 to be able to see everything that's part of the component at the same time. There
 is a lot of analysis going on. All the conditionals and loops need to be translated
