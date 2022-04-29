@@ -3,7 +3,7 @@ title = "Rust 2020: Testing"
 date = 2019-11-29
 [taxonomies]
 categories = ["Programming"]
-tags = ["rust"]
+tags = ["rust", "testing"]
 +++
 
 _originally posted on [Knowitlabs](https://knowitlabs.no/rust-2020-testing-4ab3d80112ba)_
