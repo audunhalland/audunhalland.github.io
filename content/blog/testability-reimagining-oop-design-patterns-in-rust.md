@@ -20,7 +20,7 @@ This is the first in a series of posts, with the end goal of presenting a full e
 pattern for Rust applications that enables easy testability everywhere.
 
 ### Testing terminology
-We have some _applicaiton_ (a structured computer program) which is fairly modularized. The most interesting module of a modern program is the _function_.
+We have some _application_ (a structured computer program) which is fairly modularized. The most interesting module of a modern program is the _function_.
 We would like to verify that the functions do what they are supposed to do, so we write a _test program_ - a meta program that links
 to the original program. The test program calls the functions of the original program with some inputs, and execute some assertions on
 the outputs.
@@ -298,8 +298,8 @@ the implementation of that, and declares its _own_ dependencies.
 There's still something missing in this picture though, we don't have a working application yet!
 There is nothing that makes `a` _actually_ call `b`.
 
-To get there, we need some _type_ with implementations for both `A` and `B`, with those
-implementations actually calling the respective implementing functions:
+To get there, we need a _type_ which will implement both traits `A` and `B`, with those
+implementations acting as the final "linking stage", wiring together  `A` with `a` and `B` with `b`:
 
 ```rust
 struct Application {
@@ -324,10 +324,10 @@ impl B for Application {
 }
 ```
 
-The `Application` struct holds all the data the application needs to operate.
-
 Neither of the global functions `a` nor `b` depend on the Application directly, just on
 their immediate dependencies.
+
+The `Application` struct holds all the data the application needs to operate.
 
 _Leaf nodes_ of the dependency graph will often require access to application state.
 Examples of leaf operations could be performing a database operation, other kinds
@@ -397,7 +397,7 @@ impl A for Application {
 
 This implementation contains no code that actually depends on `Application`. It just calls the generic function `a`.
 The only reason `Application` is used here is that we need something to dispatch from in the first place. We should _generalize_ these
-implementations, should they can live in upstream crates!
+implementations, so they can live in upstream crates!
 
 In order to be able to mock our trait _and_ use its real implementation, `A` must be implemented for two distinct types. Implementing
 it specifically for a mock type and generally for every other type would be disallowed by Rust coherence rules.
