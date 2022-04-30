@@ -1,6 +1,6 @@
 +++
 title = "Testability: Reimagining OOP design patterns in Rust"
-date = 2022-04-29
+date = 2022-04-30
 [taxonomies]
 categories = ["Programming"]
 tags = ["rust", "testing"]
@@ -141,7 +141,7 @@ We will see if it is possible to improve a bit on this when we come to the Rust 
 ### Rust application architecture
 
 Rust and the JVM languages have very different designs. In Java you can "hack" the language
-during runtime to enable things that the language wasn't designed to do. Trying to do something
+during runtime to enable things that the language wasn't really designed to do. Trying to do something
 like that with Rust would be close to crazy. Rust has no reflection, so it is much
 more limited in the things it might be able to infer during runtime. Rust only does exactly what the
 code says, with very few exceptions.
@@ -154,6 +154,16 @@ a release build does not include the tests.
 Altough we can use traits to achieve IoC, it's very much opt-in. A standard method call in Rust
 is not dispatched. It's only dispatched if some kind of _generics_ are involved (a zero-cost
 abstraction), and when `dyn` is used (which is not completely zero cost).
+
+#### Testing philosophy in Rust
+I think that Rust codebases have traditionally leaned more upon integration testing than unit testing.
+The unit tests that I tend to see there, are usually tests for _utilities_. Unit-testing
+utilities is easy.
+
+Business logic seems to get less attention. I don't know the answer why, but it _might_ be because
+there aren't any established design patterns.
+
+#### Trying to port the OOP patterns directly
 
 First, we can imagine something like this:
 
@@ -198,13 +208,13 @@ struct FooControllerImpl<F> {
 }
 ```
 
-But Instead I really want to break this apart and try to lose all these "wannabe-class" things.
+But Instead I really want to break this properly apart and try to lose all these "wannabe-class" things.
 
 #### Modules
 
-In Java, a code module/file always equals a class. Rust just
+In Java, a code module/file always equals a `class` which somehow needs to be instantiated. Rust just
 has normal code modules, and you usually group together related types, impls, traits and functions
-and put them in the same module.
+and put them in the same module. You don't instantiate a Rust module.
 
 #### Functions or methods?
 In Rust, it is not always clear whether you should make some computation a _function_ or a _method_.
@@ -213,7 +223,9 @@ If it is very clear what the _subject_ is that you are operating on, you should 
 But a design like the following will appear contrived to many Rust developers:
 
 ```rust
-struct FooServiceImpl {}
+struct FooServiceImpl {
+    bar_service: ?
+}
 
 impl FooServiceImpl {
     fn do_something(&self) {
@@ -241,7 +253,7 @@ I'd now like to introduce a design based on combining functions and traits, to a
 The idea is that some function `a` has a generic parameter called `deps` that declares all its
 dependencies as a union of trait bounds.
 
-An abstract function that can be depended upon is declared as a trait:
+An abstract computation that can be depended upon is declared as a trait:
 
 ```rust
 trait B {
@@ -257,9 +269,9 @@ fn a(deps: &impl B) {
 }
 ```
 
-(`impl B` just means being generic over some type that implements the trait `B`)
+(`impl B` is a shorthand notation, it means being generic over some type that implements the trait `B`)
 
-Expanding a bit, let's make a full declaration of `A`  and `B`:
+Expanding a bit, let's write out the full declarations of both `A`  and `B`:
 
 ```rust
 trait A {
@@ -274,7 +286,7 @@ trait B {
     fn b(&self);
 }
 
-fn b<T>(deps: &T) {
+fn b<T>(deps: &T) { // (T is unbounded, as it's not used)
     unimplemented!()
 }
 ```
@@ -286,7 +298,8 @@ the implementation of that, and declares its _own_ dependencies.
 There's still something missing in this picture though, we don't have a working application yet!
 There is nothing that makes `a` _actually_ call `b`.
 
-To get there, we need some _type_ that implements both `A` and `B`.
+To get there, we need some _type_ with implementations for both `A` and `B`, with those
+implementations actually calling the respective implementing functions:
 
 ```rust
 struct Application {
@@ -366,24 +379,125 @@ fn a(deps: &(impl B + C)) {
 }
 ```
 
+#### Generalizing the implementations
+The drawback with having a type like `Application` used everywhere is that each trait implementation needs
+to be aware of the final type that's going to be used. This would make it a bit harder to modularize
+an application into multiple crates, and `Application` should architecturally exist in one of the most downstream
+crates.
+
+Take a look at `A for Application` again:
+
+```rust
+impl A for Application {
+    fn a(&self) {
+        a(self)
+    }
+}
+```
+
+This implementation contains no code that actually depends on `Application`. It just calls the generic function `a`.
+The only reason `Application` is used here is that we need something to dispatch from in the first place. We should _generalize_ these
+implementations, should they can live in upstream crates!
+
+In order to be able to mock our trait _and_ use its real implementation, `A` must be implemented for two distinct types. Implementing
+it specifically for a mock type and generally for every other type would be disallowed by Rust coherence rules.
+
+What we need is a _Generic Implementation-Providing Smart Pointer™_.
+
+```rust
+struct ImplRef<'t, T: ?Sized>(&'t T);
+```
+
+Every crate would depend on a common micro-crate that just provides this type.
+The impl of function `a`, as the trait `A`, depending on trait `B`, would then look like:
+
+```rust
+impl<'t, T> A for ImplRef<'t, T>
+    where ImplRef<'t, T>: B,
+        T: Sync
+{
+    fn a(&self) {
+        a(self)
+    }
+}
+```
+
+It's implemented for _any_ `T`! But what is `T`? `T` is the immutable state  of the appliction.
+
+Now we can also write an `AsImpl` trait with an `as_impl` method that has a blanket impl for any type, so we could write this:
+
+```rust
+struct AppState {
+    // ... things go here
+};
+
+fn entry_point(state: AppState) {
+    state
+        .as_impl() // -> ImplRef<'_, AppState>
+        .a(); // Call trait method `A::a`, which again calls `fn a`
+}
+```
+
+`AppState` now gets generically "tunneled" through the system from the entry point
+to dependency leaf nodes. We can "dig out" the AppState at the other side, keeping
+the rest of the application generic:
+
+```rust
+trait INeedAppState {
+    fn i_need_app_state(&self);
+}
+
+// non-generic function
+fn i_need_app_state(app_state: &AppState) {
+    // lowest level of business logic,
+    // bottom of the call stack.
+    // From here, only utilities are used.
+    // e.g. a HTTP library
+}
+
+impl<'t> INeedAppState for ImplRef<'t, AppState> {
+    fn i_need_app_state(&self) {
+        i_need_app_state(self)
+    }
+}
+```
+
+Having this impl in the leaf position, requires all of the application
+to depend on `AppState`. But `ImplRef` can be _projected_, so we could
+call into sub-crates of our application:
+
+```rust
+fn i_need_app_state(app_state: &AppState) {
+    // Call into the "storage" module:
+    // This is now a new sub-entry-point.
+    app_state
+        .storage
+        .as_impl()
+        .fetch_something(); // call into a deps-pattern subsystem
+}
+```
+
 #### Real-world backend application
 Integrating the "deps-pattern" into a real world backend will be very easy.
 
 We'll use an [Axum](https://docs.rs/axum/latest/axum/) handler as an example:
 
 ```rust
-let shared_application = Arc::new(Application {
+let app_state = Arc::new(AppState {
     /* all the required configuration and state, etc */
 });
 
-let app = Router::new()
-    .route("/", get(handler))
+let axum_app = Router::new()
+    .route("/", get(handler_as_entry_point))
     .layer(Extension(shared_application));
 
-async fn handler(
-    Extension(application): Extension<Arc<Application>>,
+async fn handler_as_entry_point(
+    Extension(state): Extension<Arc<AppState>>,
 ) {
-    application.my_top_level_business_logic().await
+    state
+        .as_impl()
+        .my_top_level_business_logic()
+        .await
 }
 ```
 
@@ -405,7 +519,7 @@ since it's all based on trait bounds. And (almost) everything should be zero cos
 In unit tests, we can provide alternative implementations of the traits
 depended upon.
 
-_There is one great disadvantage though, and that is that it's still very verbose._
+_There is one great disadvantage though._ Can you guess it? It's the verbosity and all the boilerplate code.
 The final pattern that I present will solve that isssue. Yes,
 it will involve the use of macros! And yes, that will be presented in the next post,
 because this is the end of this one.
