@@ -489,7 +489,7 @@ let app_state = Arc::new(AppState {
 
 let axum_app = Router::new()
     .route("/", get(handler_as_entry_point))
-    .layer(Extension(shared_application));
+    .layer(Extension(app_state));
 
 async fn handler_as_entry_point(
     Extension(state): Extension<Arc<AppState>>,
