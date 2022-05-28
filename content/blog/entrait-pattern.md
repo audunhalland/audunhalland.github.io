@@ -1,6 +1,6 @@
 +++
 title = "The entrait pattern"
-date = 2022-05-16
+date = 2022-05-28
 [taxonomies]
 categories = ["Programming"]
 tags = ["rust", "testing"]
@@ -12,10 +12,12 @@ pattern for Rust applications, that can help with testing of business logic. In 
 turn dependencies into _inputs_ when we run tests, so that we can test function bodies as _units_.
 
 The last blog post presented some workable ideas, which suffered a bit from being too verbose to write by hand. This time
-I will write about a macro that I named `entrait`, that removes all of this boilerplate. In my view, this
-macro is so handy that a new design pattern can be named after it! I hereby coin the term _the Entrait Pattern_.
+I will write about a macro that I named
+[`entrait`](https://docs.rs/entrait/0.3.0-beta.0/entrait/index.html),
+which removes this boilerplate. _The entrait pattern_ is a certain code style and design technique
+that is used together with the macro.
 
-To recap, very briefly; the main problem we would like to tackle is _unit testing_ of business logic:
+To start from the beginning: The main problem we would like to tackle is _unit testing_ of business logic:
 
 ```rust
 fn my_function() -> i32 {
@@ -40,8 +42,8 @@ fn my_function() {
 }
 ```
 
-The entrait macro operates in _append only_ mode, so the original function is not changed in any way is and outputted verbatim. What gets appended,
-is the trait definition:
+The entrait macro operates in _append only_ mode, so the original function is not changed in any way and is outputted verbatim.
+The generated code that gets appended, includes the trait definition:
 
 ```rust
 trait MyFunction {
@@ -246,9 +248,7 @@ fn my_function_should_add_two_numbers() {
 A testing pattern seen in various OOP languages is mocking out business
 logic at an _arbitrary distance_ from the direct function being tested.
 I think in some circles this might be referred to as _integration testing_.
-Tests come in different varieties, and each have their use. You might have
-read about _The Test Pyramid_, it will tell you that deeper tests definitely have their
-use.
+Sometimes a deeper integration test is the best strategy for a particular problem.
 
 The real advantage, the _crux_ if you will, about the entrait pattern, is that
 both unit and integration tests (of arbitrary depth!) become very much a reality.
@@ -281,15 +281,75 @@ With that kind of setup, you can start at the other end, i.e. instead of specify
 dependency to your unit test, you instead say which interfaces to _mock out_. Subtractive instead of additive mocking.
 
 There is one kind of function that cannot be automatically unmocked though. It's those functions that have non-generic
-dependencies that live at the leaf nodes of our dependency graph. Those will continue to produce panics
+`deps` that live at the leaf nodes of our dependency graph. Those will continue to produce panics
 unless they are explicitly mocked.
+
+## Testing an application's external interface
+Consider a REST API where we would like to test the interface of the API without invoking the
+application's inner business logic. REST handlers in Rust are usually `async fn`s passed to some web framework.
+I will present a simple example using `Axum` here:
+
+```rust
+async fn my_handler<A>(
+    Extension(app): Extension<A>
+) -> ResponseType
+    where A: SomeEntraitMethod + Sized + Clone + Send + Sync + 'static
+{
+    app.some_entrait_method()
+}
+```
+
+We can make a generic Axum `Router` using the same trait bounds, but duplicating these trait bounds
+for a lot of different endpoints sounds a bit tedious. A solution to that could be to group related
+handlers together in a generic struct, and have the handlers as static methods of that struct:
+
+```rust
+struct MyApi<D>(std::marker::PhantomData<D>);
+
+impl<D> MyApi<D>
+where
+    D: SomeEntraitMethod + SomeOtherEntraitMethod + Sized + Clone + Send + Sync + 'static
+{
+    pub fn router() {
+        Router::new()
+            .route("/api/foo", get(Self::foo))
+            .route("/api/bar", get(Self::bar))
+    }
+
+    async fn foo(
+        Extension(deps): Extension<D>
+    ) -> ResponseType {
+        deps.some_entrait_method().await
+    }
+
+    async fn bar(
+        Extension(deps): Extension<D>
+    ) -> ResponseType {
+        deps.some_other_entrait_method().await
+    }
+}
+```
+
+### entrait and `async`
+The last example used `async fn`, but async functions in traits are not supported out of the box in current Rust.
+The way around that for now is to use `#[async_trait]`. Entrait supports this by accepting a keyword argument list:
+
+```rust
+#[entrait(Foo, async_trait=true)]
+async fn foo() {
+}
+```
+
+This has been designed in an opt-in way to make it more visible that we are paying the cost of heap allocation
+for every function invocation. When Rust one day supports `async fn` in traits natively, you should be able
+to remove this opt-in feature and things should then work in the same manner as synchronous functions.
 
 ## Conclusion and further reading
 The entrait pattern and related crates are in an experimental state. `unimock` depends on `#[feature(generic_associated_types)]`, so
 you will need a nightly Rust compiler to be able to use it (at the time of writing).
 
 What I'm hoping to achieve with this blog post is some feedback on the ideas and current implementation. I'm hoping
-some people will find the time to try it out, and maybe find flaws in the design, that I might be able to improve.
+some people will find the time to try it out, and maybe find flaws in the design that I might be able to improve.
 
 This blog post does not go into great depth about `unimock` or `entrait`. At the time of writing, both crates are
 released on `crates.io`, but only as beta versions, because of the dependency on the nightly compiler.
