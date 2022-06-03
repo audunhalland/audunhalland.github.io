@@ -13,7 +13,7 @@ turn dependencies into _inputs_ when we run tests, so that we can test function 
 
 The last blog post presented some workable ideas, which suffered a bit from being too verbose to write by hand. This time
 I will write about a macro that I named
-[`entrait`](https://docs.rs/entrait/0.3.0-beta.0/entrait/index.html),
+[`entrait`](https://docs.rs/entrait/0.3.0/entrait/index.html),
 which removes this boilerplate. The _entrait pattern_ is a certain code style and design technique
 that is used together with the macro.
 
