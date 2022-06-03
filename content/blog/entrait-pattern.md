@@ -1,6 +1,6 @@
 +++
 title = "The entrait pattern"
-date = 2022-05-28
+date = 2022-06-03
 [taxonomies]
 categories = ["Programming"]
 tags = ["rust", "testing"]
@@ -9,12 +9,12 @@ tags = ["rust", "testing"]
 
 [Last time](/blog/testability-reimagining-oop-design-patterns-in-rust/) I presented an idea for a design
 pattern for Rust applications, that can help with testing of business logic. In short, we need a way to
-turn dependencies into _inputs_ when we run tests, so that we can test function bodies as _units_.
+turn dependencies into _inputs_ when we run tests, so that we can test function bodies as units.
 
 The last blog post presented some workable ideas, which suffered a bit from being too verbose to write by hand. This time
 I will write about a macro that I named
 [`entrait`](https://docs.rs/entrait/0.3.0-beta.0/entrait/index.html),
-which removes this boilerplate. _The entrait pattern_ is a certain code style and design technique
+which removes this boilerplate. The _entrait pattern_ is a certain code style and design technique
 that is used together with the macro.
 
 To start from the beginning: The main problem we would like to tackle is _unit testing_ of business logic:
@@ -37,10 +37,12 @@ When you have written a regular
 function, you can annotate it with `entrait` to automatically generate a _single-method trait_ based on its signature:
 
 ```rust
-#[entrait(MyFunction)]
+#[entrait(pub MyFunction)]
 fn my_function() {
 }
 ```
+
+The arguments to entrait is an optional visibility specifier, then the name of the trait to generate.
 
 The entrait macro operates in _append only_ mode, so the original function is not changed in any way and is outputted verbatim.
 The generated code that gets appended, includes the trait definition:
@@ -51,7 +53,8 @@ trait MyFunction {
 }
 ```
 
-along with a generic implementation for [`implementation::Impl`](https://docs.rs/implementation/latest/implementation/struct.Impl.html):
+along with a generic implementation for [`implementation::Impl`](https://docs.rs/implementation/latest/implementation/struct.Impl.html)
+with a `Sync`[^1] bound for `T`:
 
 ```rust
 impl<T> MyFunction for ::implementation::Impl<T>
@@ -196,7 +199,7 @@ This is where mocking enters the picture. We need _mock implementations_ of the 
 and crucially, it must be _one type_ that implements both.
 
 ## Unimock
-Enter `unimock`, a new mock crate that is designed to be the testing companion to `entrait`. _Uni_ means _one_,
+Enter [unimock](https://docs.rs/unimock), a new mock crate that is designed to be the testing companion to `entrait`. _Uni_ means _one_,
 and the core idea is that unimock exports one struct, `Unimock`, which acts as an additional implementation target for
 your traits.
 
@@ -218,7 +221,7 @@ use entrait::unimock::*;
 fn your_function() -> i32 { todo!() }
 ```
 
-When we write it like that, `YourFunction` will get _two_ generated implementations:
+When we write it like that, entrait will generate _two_ implementations of `YourFunction`:
 
 1. for `implementation::Impl<T>`
 2. for `unimock::Unimock`
@@ -231,7 +234,7 @@ use unimock::*;
 
 #[test]
 fn my_function_should_add_two_numbers() {
-    let unimock = mock([
+    let deps = mock([
         your_function::Fn::each_call(matching!())
             .returns(1)
             .in_any_order(),
@@ -240,7 +243,7 @@ fn my_function_should_add_two_numbers() {
             .in_any_order(),
     ]);
 
-    assert_eq!(3, my_function(&unimock));
+    assert_eq!(3, my_function(&deps));
 }
 ```
 
@@ -248,7 +251,7 @@ fn my_function_should_add_two_numbers() {
 A testing pattern seen in various OOP languages is mocking out business
 logic at an _arbitrary distance_ from the direct function being tested.
 I think in some circles this might be referred to as _integration testing_.
-Sometimes a deeper integration test is the best strategy for a particular problem.
+Sometimes a deeper integration test is the best testing strategy for a particular problem.
 
 The real advantage, the _crux_ if you will, about the entrait pattern, is that
 both unit and integration tests (of arbitrary depth!) become very much a reality.
@@ -261,8 +264,8 @@ fn my_function(deps: &(impl YourFunction + SomeOtherFunction)) -> i32 {
 }
 ```
 
-`deps` can be a reference to any type that implements `YourFunction` and `SomeOtherFunction`.
-`Unimock` can be that type, and we pass it into deps to unit test the function.
+`deps` can be a reference to any type that implements the given traits.
+`Unimock` matches that criteria, and we pass it into deps to unit test the function.
 
 What happens when `Unimock::your_function()` is called? Unimock must be configured before it's used.
 For example, it can match input patterns in order to find some value to return.
@@ -276,18 +279,14 @@ There are two main ways to configure a unimock instance:
 1. `unimock::mock(clauses)` - Every interaction must be declared up front. If not, you'll get a panic.
 2. `unimock::spy(clauses)` - Every interaction is _unmocked_ by default.
 
-A `Unimock` created with `unimock::spy` is an alternative implementation of your entire entraited application.
+A `Unimock` value created with `unimock::spy` is an alternative implementation of your entire[^2] entraited application.
 With that kind of setup, you can start at the other end, i.e. instead of specifying the value of each
-dependency to your unit test, you instead say which interfaces to _mock out_. Subtractive instead of additive mocking.
-
-There is one kind of function that cannot be automatically unmocked though. It's those functions that have non-generic
-`deps` that live at the leaf nodes of our dependency graph. Those will continue to produce panics
-unless they are explicitly mocked.
+dependency to your unit test, you can instead say which interfaces to _mock out_. Subtractive instead of additive mocking.
 
 ## Testing an application's external interface
 Consider a REST API where we would like to test the interface of the API without invoking the
 application's inner business logic. REST handlers in Rust are usually `async fn`s passed to some web framework.
-I will present a simple example using `Axum` here:
+I will present a simple example using [axum](https://docs.rs/axum) here:
 
 ```rust
 async fn my_handler<A>(
@@ -340,25 +339,23 @@ async fn foo() {
 }
 ```
 
-This has been designed in an opt-in way to make it more visible that we are paying the cost of heap allocation
+This has been designed in an opt-in manner to make it more visible that we are paying the cost of heap allocation
 for every function invocation. When Rust one day supports `async fn` in traits natively, you should be able
 to remove this opt-in feature and things should then work in the same manner as synchronous functions.
 
 ## Conclusion and further reading
-The entrait pattern and related crates are in an experimental state. `unimock` depends on `#[feature(generic_associated_types)]`, so
-you will need a nightly Rust compiler to be able to use it (at the time of writing).
+The entrait pattern and related crates are in an experimental state.
 
 What I'm hoping to achieve with this blog post is some feedback on the ideas and current implementation. I'm hoping
-some people will find the time to try it out, and maybe find flaws in the design that I might be able to improve.
+some people will find the time to try it out, and maybe find flaws in the design that could be improved.
 
-This blog post does not go into great depth about `unimock` or `entrait`. At the time of writing, both crates are
-released on `crates.io`, but only as beta versions, because of the dependency on the nightly compiler.
+This blog post does not go into great depth about `entrait` or `unimock`.
 You will hopefully find much more useful information if you visit respective rustdoc pages for each crate:
 
 | github | crates.io | docs.rs |
 |--------------------------------------|---------------------------------|-----------------------------------------------------------------|
-| [entrait](https://github.com/audunhalland/entrait) | [0.3.0-beta.0](https://crates.io/crates/entrait/0.3.0-beta.0) | [docs](https://docs.rs/entrait/0.3.0-beta.0/entrait/index.html) |
-| [unimock](https://github.com/audunhalland/unimock) | [0.2.0-beta.0](https://crates.io/crates/unimock/0.2.0-beta.0) | [docs](https://docs.rs/unimock/0.2.0-beta.0/unimock/index.html) |
+| [entrait](https://github.com/audunhalland/entrait) | [0.3](https://crates.io/crates/entrait/0.3.0) | [docs](https://docs.rs/entrait/0.3.0/entrait/index.html) |
+| [unimock](https://github.com/audunhalland/unimock) | [0.2](https://crates.io/crates/unimock/0.2.0) | [docs](https://docs.rs/unimock/0.2.0/unimock/index.html) |
 | [implementation](https://github.com/audunhalland/implementation) | [0.1](https://crates.io/crates/implementation) | [docs](https://docs.rs/implementation)|
 
 My next plan for entrait is to develop a full-fledged example application. I will likely put it in the `examples/` directory in the entrait repository.
@@ -366,3 +363,19 @@ Meanwhile, you can take a look at the [tests/](https://github.com/audunhalland/e
 good examples.
 
 At least I hope that you found some of this to be interesting to read. I surely had an interesting time developing it and writing about it!
+
+##### Footnotes
+
+[^1]: _On `Sync` bound for `T`_: `T` should model an immutable application environment. Entrait is designed to work on multithreaded async executors,
+hence the `Sync` bound. Mutable caches and similar should be modelled with interior mutability, e.g. `Mutex`.
+
+[^2]: There is one kind of function that cannot be automatically unmocked. It's those functions that have non-generic
+`deps` that should live at the leaf level of a dependency graph:
+
+```rust
+#[entrait(Foo)]
+fn foo(deps: &SomeConcreteType) {}
+```
+
+If you create a default `unimock::spy`, a call to `Unimock::foo` will panic. But fortunately, `SomeConcreteType`
+is not part of `Foo::foo`'s signature, so it can still be mocked normally.
