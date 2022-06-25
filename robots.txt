@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://audunhalland.github.io/sitemap.xml
