@@ -5,7 +5,11 @@ template = "clean-page.html"
 
 [LinkedIn profile](https://www.linkedin.com/in/audun-halland-b0360a25/)
 
-##### [2017 - current] Senior software consultant, _Knowit Objectnet_
+##### [2022 - current] Fullstack software developer, _Protojour_
+
+- Knowledge graphs, etc
+
+##### [2017 - 2022] Senior software consultant, _Knowit Objectnet_
 
 - Develop and architect various web-based solutions for different customers.
 - Full stack web development
