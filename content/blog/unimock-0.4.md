@@ -1,6 +1,6 @@
 +++
 title = "Unimock 0.4"
-date = 2022-11-24
+date = 2022-11-27
 [taxonomies]
 categories = ["Programming"]
 tags = ["rust", "testing", "unimock"]
