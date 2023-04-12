@@ -1,5 +1,5 @@
 +++
-title = "Unimock 0.5 and how to write a type-level mock library in Rust"
+title = "How to write a type-level mock library in Rust"
 date = 2023-04-11
 [taxonomies]
 categories = ["Programming"]
@@ -9,7 +9,7 @@ tags = ["rust", "testing", "unimock"]
 [Unimock 0.5](https://docs.rs/unimock/latest/unimock/) is just out, and I wanted to reflect on how it came to be, how its design emerged and various implementation challenges along the way.
 
 ## Why unimock exists
-Rust already has a collection of mocking solutions, like the popular [mockall](https://docs.rs/mockall/latest/mockall/). Why another one?
+Rust already has a number of mocking solutions, like the popular [mockall](https://docs.rs/mockall/latest/mockall/). Why another one?
 
 The idea behind unimock comes from the observation that Rust traits form some kind of graph:
 
@@ -33,14 +33,14 @@ If we want to test `func`, the test type needs to implement both `A` and `B`.
 Ultimately, there is only one possibility: All the traits need to be implemented by _the same type_!
 
 This challenge first appeared while I experimented with [entrait](https://docs.rs/entrait/latest/entrait/), which is entirely made up of a trait graph.
-I quickly hit a road block when trying to use `mockall` as a test tool, because it uses one type per trait.
+I quickly hit a road block when trying to use `mockall` as a test tool, because it uses one type per mocked trait.
 The next sections are modelled as a walkthrough on how a universal Unimock-like mocker can be (and is!) implemented, and some of the design challenges are discussed.
 
 By _"type-level" mocker_, I mean a library that relies more on generics, traits and bounds than lots of macro-generated custom code blocks.
-Unimock, although it comes with a fairly complex procedural macro for trait parsing, is a type-level mocker.
+Unimock, although it comes with a fairly complex procedural macro that does trait parsing and analysis, is a type-level mocker.
 The macro's job is to figure out what types to define!
 
-## Implementing a simple mocker
+## Implementing a simple mocker from scratch
 Let's start with a simple trait.
 
 ```rust
@@ -70,7 +70,7 @@ trait Bar {
 }
 ```
 
-Now the `Mocker` needs two fields: A `i32` and a `String`.
+Now the `Mocker` needs two fields: An `i32` and a `String`.
 Going on like this can't scale forever, so we need to look at some more dynamic solutions.
 
 ```rust
@@ -515,3 +515,36 @@ The most notable ones are `Display`, `Debug`, `Read`, `Write` and `Seek`.
 I'm not sure where to to take unimock next.
 Should unimock depend on all kinds of third party crates or should it be the other way around?
 It's not yet clear to me what's the ideal solution.
+
+I'll close off this post by posting a new fun test case from the repo, demonstrating how `Display` and `Write` works:
+
+```rust
+use unimock::mock::core::fmt::DisplayMock;
+use unimock::mock::std::io::WriteMock;
+use unimock::*;
+
+#[test]
+fn test() {
+    // All the clauses here use `next_call`
+    // and therefore MUST happen in the specified order:
+    let mocker = Unimock::new((
+        DisplayMock::fmt
+            .next_call(matching!())
+            .mutates(|f, _| write!(f, "hello {}", "unimock")),
+        // NOTE: `write!` calls `write_all` which
+        // is a default method that implicitly
+        // gets re-routed into `write`:
+        WriteMock::write
+            .next_call(matching!(eq!(b"hello ")))
+            .returns(Ok(6)),
+        WriteMock::write
+            .next_call(matching!(eq!(b"unimock")))
+            .returns(Ok("uni".len())),
+        WriteMock::write
+            .next_call(matching!(eq!(b"mock")))
+            .returns(Ok("mock".len())),
+    ));
+
+    write!(&mut mocker.clone(), "{mocker}").unwrap();
+}
+```
