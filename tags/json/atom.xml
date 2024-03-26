@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+    <title>Audun Halland - JSON</title>
+    <subtitle>My home on the internet</subtitle>
+    <link href="https://audunhalland.github.io/tags/json/atom.xml" rel="self" type="application/atom+xml"/>
+    <link href="https://audunhalland.github.io"/>
+    <generator uri="https://www.getzola.org/">Zola</generator>
+    <updated>2020-11-20T00:00:00+00:00</updated>
+    <id>https://audunhalland.github.io/tags/json/atom.xml</id>
+    <entry xml:lang="en">
+        <title>JSON — the relational database’s built-in ORM?</title>
+        <published>2020-11-20T00:00:00+00:00</published>
+        <updated>2020-11-20T00:00:00+00:00</updated>
+        <author>
+          <name>Unknown</name>
+        </author>
+        <link rel="alternate" href="https://audunhalland.github.io/blog/json-the-relational-databases-built-in-orm/" type="text/html"/>
+        <id>https://audunhalland.github.io/blog/json-the-relational-databases-built-in-orm/</id>
+        
+        <content type="html">&lt;p&gt;&lt;em&gt;originally posted on &lt;a href=&quot;https:&#x2F;&#x2F;knowitlabs.no&#x2F;json-the-relational-databases-built-in-orm-965bd0905f4d&quot;&gt;Knowitlabs&lt;&#x2F;a&gt;&lt;&#x2F;em&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;Database code. Queries, updates, and deletes. Repositories. Like many other developers, I have struggled with these things that tend to end up rather ugly. Not only might there be a lot of programming language (SQL) embedded inside another programming language (your app’s code), but there are a lot of mappings back and forth for data types, integration code, boilerplate! Or, you might be one of the lucky ones who get to use an Object Relational Mapping-library, clean, simple, and elegant code, right, hiding all of the interesting details? This post is about the quest for the Right Abstraction.&lt;&#x2F;p&gt;
+&lt;p&gt;I’ve used two different relational databases professionally, first SQLite, and then PostgreSQL. I don’t consider myself very experienced in writing database code, but I do think that working with databases is one of the more enjoyable parts of being a developer. Except for that damn mapping code. In my first job, I used an in-house-developed ORM for SQLite, that needed constant modifications to be able to cope with the ever-growing complexity of queries coming from the layers above. ORM development tends to start out very simple: &lt;em&gt;right now I just need to read this or that table as a list&lt;&#x2F;em&gt;. But soon we need foreign keys and querying for trees, and before you know it you’ve reimplemented all the features of SQL itself. Just a lot worse, and what a mess you’re now in.&lt;&#x2F;p&gt;
+&lt;p&gt;I &lt;em&gt;like&lt;&#x2F;em&gt; working with different languages, they exist for a reason, I believe that SQL was designed to be written by humans instead of being a compiler target. I want to use all the cool features from my specific database implementation, and a general-purpose db-agnostic ORM might not support everything.&lt;&#x2F;p&gt;
+&lt;p&gt;So I prefer writing out my SQL statements, but what about the “mapping” code?&lt;&#x2F;p&gt;
+&lt;p&gt;Let’s start with a simple problem that might seem unrelated at first, with the usual boring tables:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;sql&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-sql &quot;&gt;&lt;code class=&quot;language-sql&quot; data-lang=&quot;sql&quot;&gt;&lt;span&gt;CREATE TABLE &lt;&#x2F;span&gt;&lt;span style=&quot;color:#fad07a;&quot;&gt;customer
+&lt;&#x2F;span&gt;&lt;span&gt;    id UUID &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fbfdc;&quot;&gt;PRIMARY KEY &lt;&#x2F;span&gt;&lt;span&gt;NOT NULL,
+&lt;&#x2F;span&gt;&lt;span&gt;    name &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fbfdc;&quot;&gt;TEXT&lt;&#x2F;span&gt;&lt;span&gt;;CREATE TABLE &lt;&#x2F;span&gt;&lt;span style=&quot;color:#fad07a;&quot;&gt;order
+&lt;&#x2F;span&gt;&lt;span&gt;    id UUID &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fbfdc;&quot;&gt;PRIMARY KEY &lt;&#x2F;span&gt;&lt;span&gt;NOT NULL,
+&lt;&#x2F;span&gt;&lt;span&gt;    customer_id UUID NOT NULL &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fbfdc;&quot;&gt;REFERENCES&lt;&#x2F;span&gt;&lt;span&gt; customer (id),
+&lt;&#x2F;span&gt;&lt;span&gt;    description &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fbfdc;&quot;&gt;TEXT&lt;&#x2F;span&gt;&lt;span&gt;;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;The task at hand is to query for all customers and all orders for each customer (yes, I want it to be structured). There are several ways to do that. Often, to keep things very simple, the solution might be to issue &lt;a href=&quot;https:&#x2F;&#x2F;stackoverflow.com&#x2F;questions&#x2F;97197&#x2F;what-is-the-n1-selects-problem-in-orm-object-relational-mapping&quot;&gt;N+1&lt;&#x2F;a&gt; separate queries:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;sql&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-sql &quot;&gt;&lt;code class=&quot;language-sql&quot; data-lang=&quot;sql&quot;&gt;&lt;span&gt;SELECT id, name FROM customer;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;followed by&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;sql&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-sql &quot;&gt;&lt;code class=&quot;language-sql&quot; data-lang=&quot;sql&quot;&gt;&lt;span&gt;SELECT id, description
+&lt;&#x2F;span&gt;&lt;span&gt;FROM order
+&lt;&#x2F;span&gt;&lt;span&gt;WHERE customer_id = $customer_id;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;issued for each of those initial rows. But this usually leads to performance issues because of missed optimization opportunities by the RDBMS, so I think we can do better.&lt;&#x2F;p&gt;
+&lt;p&gt;Let’s leave that thought for a while and go back to the problem of deserializing rows into something that’s nice to work within my programming language of choice. For a &lt;em&gt;customer&lt;&#x2F;em&gt;, we usually want some kind of object having the fields &lt;code&gt;id&lt;&#x2F;code&gt; and &lt;code&gt;name&lt;&#x2F;code&gt;. A mapper, in pseudocode, could look like:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;javascript&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-javascript &quot;&gt;&lt;code class=&quot;language-javascript&quot; data-lang=&quot;javascript&quot;&gt;&lt;span style=&quot;color:#8fbfdc;&quot;&gt;function &lt;&#x2F;span&gt;&lt;span style=&quot;color:#fad07a;&quot;&gt;row_to_customer&lt;&#x2F;span&gt;&lt;span&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;row&lt;&#x2F;span&gt;&lt;span&gt;) {
+&lt;&#x2F;span&gt;&lt;span&gt;    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#fad07a;&quot;&gt;Customer&lt;&#x2F;span&gt;&lt;span&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;id &lt;&#x2F;span&gt;&lt;span&gt;= &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;row&lt;&#x2F;span&gt;&lt;span&gt;[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;id&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;], &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;name &lt;&#x2F;span&gt;&lt;span&gt;= &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;row&lt;&#x2F;span&gt;&lt;span&gt;[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;])
+&lt;&#x2F;span&gt;&lt;span&gt;}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;That’s the type of boilerplate I don’t like writing. But it’s deserialization, and there’s one serialization format that any programming language will be able to deserialize for you (with hopefully very little boilerplate), and that’s &lt;em&gt;JSON&lt;&#x2F;em&gt;. These days I’m mostly using PostgreSQL and it has good support for JSON, and others have too. Let’s rewrite our query:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;sql&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-sql &quot;&gt;&lt;code class=&quot;language-sql&quot; data-lang=&quot;sql&quot;&gt;&lt;span&gt;SELECT
+&lt;&#x2F;span&gt;&lt;span&gt;    json_build_object(
+&lt;&#x2F;span&gt;&lt;span&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;id&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;, id,
+&lt;&#x2F;span&gt;&lt;span&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;, name
+&lt;&#x2F;span&gt;&lt;span&gt;    )
+&lt;&#x2F;span&gt;&lt;span&gt;FROM customer;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;And just throw each row at our JSON deserializer, then there’s (almost) no mapping code to write anymore.&lt;&#x2F;p&gt;
+&lt;p&gt;Our initial case with a list of orders for each customer, JSON solves that quite easily as well:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;sql&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-sql &quot;&gt;&lt;code class=&quot;language-sql&quot; data-lang=&quot;sql&quot;&gt;&lt;span&gt;SELECT
+&lt;&#x2F;span&gt;&lt;span&gt;    json_build_object(
+&lt;&#x2F;span&gt;&lt;span&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;id&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;, id,
+&lt;&#x2F;span&gt;&lt;span&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;, name,
+&lt;&#x2F;span&gt;&lt;span&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;orders&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;, (
+&lt;&#x2F;span&gt;&lt;span&gt;             SELECT
+&lt;&#x2F;span&gt;&lt;span&gt;                 json_agg(
+&lt;&#x2F;span&gt;&lt;span&gt;                     json_build_object(
+&lt;&#x2F;span&gt;&lt;span&gt;                         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;id&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;, id
+&lt;&#x2F;span&gt;&lt;span&gt;                         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;description&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;, description
+&lt;&#x2F;span&gt;&lt;span&gt;                     )
+&lt;&#x2F;span&gt;&lt;span&gt;                     ORDER BY description
+&lt;&#x2F;span&gt;&lt;span&gt;                 )
+&lt;&#x2F;span&gt;&lt;span&gt;             FROM order
+&lt;&#x2F;span&gt;&lt;span&gt;             WHERE &lt;&#x2F;span&gt;&lt;span style=&quot;color:#7697d6;&quot;&gt;order&lt;&#x2F;span&gt;&lt;span&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#7697d6;&quot;&gt;customer_id &lt;&#x2F;span&gt;&lt;span&gt;= &lt;&#x2F;span&gt;&lt;span style=&quot;color:#7697d6;&quot;&gt;customer&lt;&#x2F;span&gt;&lt;span&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#7697d6;&quot;&gt;id
+&lt;&#x2F;span&gt;&lt;span&gt;        )
+&lt;&#x2F;span&gt;&lt;span&gt;    )
+&lt;&#x2F;span&gt;&lt;span&gt;FROM customer;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;&lt;code&gt;json_agg&lt;&#x2F;code&gt; will produce a nested list inside the outer object containing the rows of the subquery, and we’re done, without any additional mapping code, except the language-specific hints potentially needed to deserialize this into the object:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;java&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-java &quot;&gt;&lt;code class=&quot;language-java&quot; data-lang=&quot;java&quot;&gt;&lt;span style=&quot;color:#8fbfdc;&quot;&gt;class &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;CustomerWithOrders &lt;&#x2F;span&gt;&lt;span&gt;{
+&lt;&#x2F;span&gt;&lt;span&gt;    id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;UUID&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    name: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;String&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    orders: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;Array&lt;&#x2F;span&gt;&lt;span&gt;&amp;lt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb964;&quot;&gt;Order&lt;&#x2F;span&gt;&lt;span&gt;&amp;gt;
+&lt;&#x2F;span&gt;&lt;span&gt;}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;I’ve used the JSON&#x2F;SQL technique with great success lately, especially for queries that involve querying many tables where a single big, fat old JOIN won’t cut it. It’s very fast: The database is allowed to do its own optimizations, and JSON is usually extremely fast to process by the application.&lt;&#x2F;p&gt;
+&lt;p&gt;Could we try a similar thing for insertion?&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;sql&quot; style=&quot;background-color:#151515;color:#e8e8d3;&quot; class=&quot;language-sql &quot;&gt;&lt;code class=&quot;language-sql&quot; data-lang=&quot;sql&quot;&gt;&lt;span&gt;INSERT INTO order (customer_id, description)
+&lt;&#x2F;span&gt;&lt;span&gt;    VALUES (
+&lt;&#x2F;span&gt;&lt;span&gt;       ($&lt;&#x2F;span&gt;&lt;span style=&quot;color:#cf6a4c;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span&gt;-&amp;gt;&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;customer_id&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span&gt;)::UUID,
+&lt;&#x2F;span&gt;&lt;span&gt;       $&lt;&#x2F;span&gt;&lt;span style=&quot;color:#cf6a4c;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span&gt;-&amp;gt;&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#99ad6a;&quot;&gt;description&lt;&#x2F;span&gt;&lt;span style=&quot;color:#556633;&quot;&gt;&amp;#39;
+&lt;&#x2F;span&gt;&lt;span&gt;    );
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Now you only have to bind one parameter instead of two and avoid at least one level of Repeating Yourself.&lt;&#x2F;p&gt;
+&lt;p&gt;Is it fair to call this the &lt;em&gt;database’s built-in ORM&lt;&#x2F;em&gt;? We used json_build_&lt;strong&gt;object&lt;&#x2F;strong&gt;, right? Seriously, I’m not sure, but it was a fun thought anyway.&lt;&#x2F;p&gt;
+&lt;p&gt;I hope you learned a useful programming pattern, at least it took a while for me to discover it.&lt;&#x2F;p&gt;
+</content>
+        
+    </entry>
+</feed>

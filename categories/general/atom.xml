@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+    <title>Audun Halland - General</title>
+    <subtitle>My home on the internet</subtitle>
+    <link href="https://audunhalland.github.io/categories/general/atom.xml" rel="self" type="application/atom+xml"/>
+    <link href="https://audunhalland.github.io"/>
+    <generator uri="https://www.getzola.org/">Zola</generator>
+    <updated>2022-04-25T00:00:00+00:00</updated>
+    <id>https://audunhalland.github.io/categories/general/atom.xml</id>
+    <entry xml:lang="en">
+        <title>The first blog post</title>
+        <published>2022-04-25T00:00:00+00:00</published>
+        <updated>2022-04-25T00:00:00+00:00</updated>
+        <author>
+          <name>Unknown</name>
+        </author>
+        <link rel="alternate" href="https://audunhalland.github.io/blog/first-post/" type="text/html"/>
+        <id>https://audunhalland.github.io/blog/first-post/</id>
+        
+        <content type="html">&lt;p&gt;I decided to create a BLOG, and this is the first post in the blog.&lt;&#x2F;p&gt;
+&lt;p&gt;I haven&#x27;t thought fully through what the blog will be about. Probably things
+that I&#x27;m interested in, care and think about. Probably a large part of it
+will be about computer programming.&lt;&#x2F;p&gt;
+&lt;p&gt;I just made the big blog decision earlier today. But then I didn&#x27;t really know
+what to do. I might be a professional software developer, but I&#x27;m not that
+great at &lt;em&gt;web&lt;&#x2F;em&gt; things. I had heard about the JAM stack movement and statically
+generated web pages, but I didn&#x27;t make the connection that I could actually build
+a blog that way! A co-worker just told me. He listed up various framework
+that can be used, and of course I went with the &lt;em&gt;blazing fast&lt;&#x2F;em&gt; Rust one: &lt;a href=&quot;https:&#x2F;&#x2F;getzola.org&quot;&gt;Zola&lt;&#x2F;a&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;I have been a Rust user since 2016 when I first heard about the language.
+Sometimes at work, but mostly personal projects. Even though I probably
+spend most of my time with other languages, I now consider Rust my &amp;quot;main&amp;quot; language.
+There could be many reasons for that. I enjoy efficient execution, probably
+because of my background in C&#x2F;C++ and mobile&#x2F;embedded. Rust is an intriguing
+language to use. There are &lt;em&gt;constraints&lt;&#x2F;em&gt;, it&#x27;s limiting my inner desire
+to make silly, short-sighted design choices. Other languages mostly feel easy to
+master, but Rust is a continuous learning experience. But this is why I love it,
+its excellence in closely modelling the complex craft that programming really is,
+and that you can&#x27;t ever &lt;em&gt;really&lt;&#x2F;em&gt; abstract away.&lt;&#x2F;p&gt;
+&lt;p&gt;So this blog will likely have some Rust content in it. Maybe it will contain
+something about music too. Playing, creating and listening to (mostly old) music is my
+other passion. Perhaps I will import some things written on other blogging platforms
+into this blog. Those posts will then predate this post, but this is still the
+first post of &lt;em&gt;this&lt;&#x2F;em&gt; blog!&lt;&#x2F;p&gt;
+&lt;p&gt;Next I&#x27;ll likely have to make some theme adjustments, even though I promised myself
+I wasn&#x27;t going to care about the visual style of the blog.&lt;&#x2F;p&gt;
+</content>
+        
+    </entry>
+</feed>
