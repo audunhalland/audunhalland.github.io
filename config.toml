@@ -165,6 +165,7 @@ menu = [
     { name = "About", url = "/about/" },
     { name = "Resume", url = "/resume/" },
     { name = "Github", url = "https://github.com/audunhalland" },
+    { name = "Mastodon", url = "https://mas.to/@audunhalland" },
 ]
 # Avatar at homepage
 avatar_url = ""
