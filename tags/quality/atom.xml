@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+    <title>Audun Halland - quality</title>
+    <subtitle>My home on the internet</subtitle>
+    <link href="https://audunhalland.github.io/tags/quality/atom.xml" rel="self" type="application/atom+xml"/>
+    <link href="https://audunhalland.github.io"/>
+    <generator uri="https://www.getzola.org/">Zola</generator>
+    <updated>2022-06-25T00:00:00+00:00</updated>
+    <id>https://audunhalland.github.io/tags/quality/atom.xml</id>
+    <entry xml:lang="en">
+        <title>An inquiry into code and language quality</title>
+        <published>2022-06-25T00:00:00+00:00</published>
+        <updated>2022-06-25T00:00:00+00:00</updated>
+        <author>
+          <name>Unknown</name>
+        </author>
+        <link rel="alternate" href="https://audunhalland.github.io/blog/inquiry-into-code-and-language-quality/" type="text/html"/>
+        <id>https://audunhalland.github.io/blog/inquiry-into-code-and-language-quality/</id>
+        
+        <content type="html">&lt;p&gt;I recently had a very small dispute with someone about &lt;em&gt;code quality&lt;&#x2F;em&gt;.
+Afterwards, I wasn&#x27;t sure if I fully understood the concept, so I wanted to write something down to organize my thoughts around this topic.&lt;&#x2F;p&gt;
+&lt;p&gt;In my experience, people, including myself, will name this code or that code as &lt;em&gt;bad&lt;&#x2F;em&gt; or &lt;em&gt;good&lt;&#x2F;em&gt; quality, often without much thought behind it.
+This could be because &lt;em&gt;quality&lt;&#x2F;em&gt; could be a measure of whether we subjectively like what we see, or not.
+But I suspect that it may be possible to speak about &lt;em&gt;objective quality&lt;&#x2F;em&gt; in the context of computer code.&lt;&#x2F;p&gt;
+&lt;p&gt;I also find it amusing to argue with people on what are good and bad programming languages. More on that towards the end.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;objective-quality&quot;&gt;Objective quality&lt;&#x2F;h2&gt;
+&lt;p&gt;I&#x27;ll try to define some terminology.
+A &lt;em&gt;computer program&lt;&#x2F;em&gt; is made from a &lt;em&gt;code base&lt;&#x2F;em&gt;.
+A code base produces different computer programs at different points in time, because the code base is being changed by humans over time.
+A code base at a point in time is usually referred to as just &lt;em&gt;(the) code&lt;&#x2F;em&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;Code and code bases is by and for humans, programs are for computers.
+Code bases may be very large or very small.
+Compilers and interpreters are programs that implement a programming language, whose job is to turn code into computer programs.&lt;&#x2F;p&gt;
+&lt;p&gt;Based on this, we can suggest the most important &lt;em&gt;code quality&lt;&#x2F;em&gt;:&lt;&#x2F;p&gt;
+&lt;h4 id=&quot;1-the-code-can-be-turned-into-a-valid-computer-program&quot;&gt;1. The code can be turned into a valid computer program.&lt;&#x2F;h4&gt;
+&lt;p&gt;This can be done using a compiler or an interpreter. Failing to execute a single program
+instruction from the resulting program will mean that this quality is not present.&lt;&#x2F;p&gt;
+&lt;p&gt;Code having this quality is simply &lt;em&gt;better&lt;&#x2F;em&gt; than code lacking this quality.&lt;&#x2F;p&gt;
+&lt;p&gt;Moving on..&lt;&#x2F;p&gt;
+&lt;h4 id=&quot;2-executing-the-program-produced-from-the-code-does-what-the-programmer-intended&quot;&gt;2. Executing the program produced from the code does what the programmer intended.&lt;&#x2F;h4&gt;
+&lt;p&gt;This quality is related to the absence of bugs in the program.
+If the code looks like it might do one thing, but then the program does a different thing, it will lead to a decrease in general quality, because of a decrease in this &lt;em&gt;specifc&lt;&#x2F;em&gt; quality.&lt;&#x2F;p&gt;
+&lt;h4 id=&quot;3-it-is-possible-to-find-the-source-of-a-bug-by-just-reading-the-code&quot;&gt;3. It is possible to find the source of a bug by just reading the code.&lt;&#x2F;h4&gt;
+&lt;p&gt;This quality assumes some human skill, but that&#x27;s necessary for writing code that verify as valid computer programs in the first place.&lt;&#x2F;p&gt;
+&lt;p&gt;If this quality is present in code, it is possible to read through the code lines and find problems without using other tools like debuggers.
+It is related to &lt;em&gt;code readablility&lt;&#x2F;em&gt;, but that&#x27;s more subjective and not the same thing.&lt;&#x2F;p&gt;
+&lt;p&gt;This quality is about completeness, and code being more excplicit than implicit.
+The code should do what it looks like it does, not more, and not less.
+It shouldn&#x27;t try to hide any details.
+It seems somewhat related to the previous quality:
+Code that has a fewer number of bugs, tends to be more explicit than code that contains more bugs.
+There could be several reasons for that, but I can think of two, both of which relate to the previously mentioned qualities:&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;The code base has accumulated bugfixes over time, because bugs have been found and the code base has since been corrected over and over again.
+Code is usually less explicit before a bug fix than after: Most bugfixes involve &lt;em&gt;adding some more code&lt;&#x2F;em&gt; (though this is not always true).&lt;&#x2F;li&gt;
+&lt;li&gt;The code needs to be valid computer program in order to be useful at all, and the compiler&#x2F;interpreter &lt;em&gt;required&lt;&#x2F;em&gt; the programmer to be explicit.&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;&lt;em&gt;Explicit&lt;&#x2F;em&gt; programs that are valid are better then &lt;em&gt;implicit&lt;&#x2F;em&gt; programs that are valid.&lt;&#x2F;p&gt;
+&lt;p&gt;But there is nothing about &lt;em&gt;code quality&lt;&#x2F;em&gt; in itself that make any of these mentioned qualities related to each other.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;programming-language-quality&quot;&gt;Programming language quality&lt;&#x2F;h2&gt;
+&lt;p&gt;A programming language is required for turning code into a computer program. The programming language either accepts or rejects code validity.&lt;&#x2F;p&gt;
+&lt;p&gt;Are we allowed to say that some programming languages have better quality than others?&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s try.&lt;&#x2F;p&gt;
+&lt;h4 id=&quot;1-a-programming-language-that-rejects-more-programs-has-better-quality-than-one-that-rejects-less&quot;&gt;1. A programming language that rejects more programs has better quality than one that rejects less&lt;&#x2F;h4&gt;
+&lt;p&gt;This is trivially false, because a language that accepts no programs is not a good quality programming language.&lt;&#x2F;p&gt;
+&lt;h4 id=&quot;2-a-programming-language-has-good-quality-if-it-objectively-rejects-low-quality-code&quot;&gt;2. A programming language has good quality if it objectively rejects low quality code&lt;&#x2F;h4&gt;
+&lt;p&gt;I think we can say that a programming language that rejects more buggy programs than another one is a better programming language (if
+all other things are equal).&lt;&#x2F;p&gt;
+&lt;p&gt;If this is true, using a higher quality programming language will lead to higher quality code.&lt;&#x2F;p&gt;
+&lt;p&gt;To illustrate: I believe that many developers like to use linters that are able detect common mistakes.
+So let&#x27;s compare a permissive language with and without a linter.
+With the linter turned on, the developer would likely write fewer bugs to begin with, i.e. higher quality code.
+Therefore, if we pretend that the language + linter were combined together to form a new language, that language would have higher quality than the original permissive language isolated.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;conclusion-for-now&quot;&gt;Conclusion for now&lt;&#x2F;h2&gt;
+&lt;p&gt;Yes, I do think we can speak of both objective quality in code, and objective quality of languages.
+Of course, I didn&#x27;t cover every possible aspect of code and language here, I was just trying to find some examples from which
+we can state something objective.&lt;&#x2F;p&gt;
+</content>
+        
+    </entry>
+</feed>

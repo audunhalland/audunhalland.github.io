@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+<title>Unimock 0.6: Mutation patterns - Audun Halland</title>
+
+    
+    <link rel="stylesheet" href="/css/simple.min.css">
+    
+    
+<style>
+pre code span {
+    color: #fff;
+}
+</style>
+
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    
+    
+    
+    
+</head>
+
+<body>
+    <header>
+        
+        <nav>
+            
+            <a href="&#x2F;blog&#x2F;">Blog</a>
+            
+            <a href="&#x2F;about&#x2F;">About</a>
+            
+            <a href="&#x2F;resume&#x2F;">Resume</a>
+            
+            <a href="https:&#x2F;&#x2F;github.com&#x2F;audunhalland">Github</a>
+            
+            <a href="https:&#x2F;&#x2F;mas.to&#x2F;@audunhalland">Mastodon</a>
+            
+        </nav>
+        
+        
+<h1>Unimock 0.6: Mutation patterns</h1>
+
+    </header>
+    
+    <main>
+        
+<article>
+    
+    <em>Published on: <time>26 Apr 2024</time></em>
+    
+    <p><a href="https://docs.rs/unimock/0.6/unimock/index.html">Unimock 0.6</a> is just out, with an important change in design which makes it much more powerful than before.</p>
+<p>The previous version (0.5) added support for parameter mutation, but it was quite limited.
+The reason for the limitation was an inferior design that took a significant amount of trial and error to finally fix.
+In hindsight it might seem obvious, but for some reason it wasn't to me.</p>
+<p><em>TL;DR</em>: Unimock's <code>answers</code> API is now based on an associated type instantiated to a <code>dyn Fn</code>.</p>
+<h2 id="background">Background</h2>
+<p>Unimock allows developers to define flexible one-off verifiable trait implementations with very little code<sup class="footnote-reference"><a href="#1">1</a></sup>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">unimock</span><span>(api = SomeTraitMock)]
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">SomeTrait </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_func</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">input</span><span>: </span><span style="color:#8fbfdc;">i32</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32</span><span>;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">let</span><span> u = Unimock::new(
+</span><span>    SomeTraitMock::my_func
+</span><span>        .next_call(matching!(</span><span style="color:#cf6a4c;">42</span><span>))
+</span><span>        .returns(</span><span style="color:#cf6a4c;">10</span><span>)
+</span><span>);
+</span><span>
+</span><span>assert_eq!(u.my_func(</span><span style="color:#cf6a4c;">42</span><span>), </span><span style="color:#cf6a4c;">10</span><span>);
+</span></code></pre>
+<p>It also supports invoking a user-supplied function to compute the output dynamically:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">let</span><span> u = Unimock::new(
+</span><span>    SomeTraitMock::my_func
+</span><span>        .next_call(matching!(</span><span style="color:#cf6a4c;">42</span><span>))
+</span><span>        .answers(|</span><span style="color:#ffb964;">input</span><span>| input * </span><span style="color:#cf6a4c;">2</span><span>) </span><span style="color:#888888;">// &lt;-- note: The old 0.5 API
+</span><span>);
+</span><span>
+</span><span>assert_eq!(u.my_func(</span><span style="color:#cf6a4c;">42</span><span>), </span><span style="color:#cf6a4c;">84</span><span>);
+</span></code></pre>
+<p>But a problem appeared when I wanted to provide a mock integration for e.g. <code>Display</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Display </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">fmt</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">f</span><span>: &amp;</span><span style="color:#8fbfdc;">mut </span><span>Formatter&lt;&#39;_&gt;) -&gt; Result&lt;(), Error&gt;;
+</span><span>}
+</span></code></pre>
+<p><code>Display</code> implementors supply behaviour by interacting with the mutable parameter <code>f</code>.
+The return value is only used for reporting errors, and can be considered secondary.</p>
+<p>As soon as the <code>answers</code> function needed to mutate parameters, it ran into problems with the type system.</p>
+<h2 id="the-old-0-5-model">The old 0.5 model</h2>
+<p>Unimock's function model was loosely based on a trait like this:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Inputs</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;i</span><span>&gt;; </span><span style="color:#888888;">// &#39;i = lifetime of borrowed values in an inputs tuple
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Output</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;u</span><span>&gt;; </span><span style="color:#888888;">// &#39;u = lifetime of output borrowed from Self
+</span><span>}
+</span></code></pre>
+<p>Using this model, it is quite easy to define a function bound like <code>Fn(F::Inputs&lt;'i&gt;) -&gt; F::Output&lt;'u&gt;</code>.
+But as soon as mutation is involved, this signature is not going to cut it, because the set of involved lifetimes is not finite anymore.</p>
+<p>Version 0.5 ended up using a hack where <em>one</em> parameter could be mutated.
+That <code>&amp;mut</code> parameter (if present) was excluded from the the <code>Inputs&lt;'i&gt;</code> tuple, and handled completely separately from all other inputs.
+This meant that it wasn't possible to use the <code>matching!</code>-macro on that parameter.
+The <code>matching</code> macro operates on immutable views of the function inputs, where a single, common lifetime parameter cuts it (because matching only reads things and does not return anything).</p>
+<p>Given these limitations it became clear that this wasn't very <em>developer friendly</em>.</p>
+<h2 id="0-6-a-better-model-for-mutation-patterns">0.6: A better model for mutation patterns</h2>
+<p>After trying many experiments with several predefined possibly-used GAT-lifetimes, I was ready to give up after hitting Rust limitations like not being able to sepcify outlives-bounds involving higher-ranked lifetimes (<code>for&lt;'a, 'b&gt; where 'b: 'a</code>).</p>
+<p>Then it occured to me that it's possible to take advantage of the compiler's builtin syntax to express exactly what is needed using <em>implied bounds</em>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">for</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>, </span><span style="color:#8fbfdc;">&#39;b</span><span>&gt; Fn(&amp;</span><span style="color:#8fbfdc;">&#39;a i32</span><span>, &amp;</span><span style="color:#8fbfdc;">&#39;b mut </span><span>Foo&lt;&#39;_&gt;) -&gt; Bar&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>&gt;
+</span></code></pre>
+<p>The <code>Fn</code> <em>syntax family</em> expresses this perfectly, but what the <code>MockFn</code> trait needs is an associated <em>type</em>, not another trait bound (the <code>MockFn</code> is implemented for different function signatures!).</p>
+<p>The answer to that is to use <code>dyn Fn</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Display </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">fmt</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">f</span><span>: &amp;</span><span style="color:#8fbfdc;">mut </span><span>Formatter&lt;&#39;_&gt;) -&gt; Result&lt;(), Error&gt;;
+</span><span>}
+</span><span>
+</span><span style="color:#888888;">// #[unimock]-generated code:
+</span><span style="color:#8fbfdc;">mod </span><span style="color:#ffb964;">DisplayMock </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">fmt</span><span>;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>MockFn for </span><span style="color:#ffb964;">DisplayMock</span><span>::</span><span style="color:#ffb964;">fmt </span><span>{
+</span><span>    </span><span style="color:#888888;">// ...
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">AnswerFn </span><span>= dyn (
+</span><span>        </span><span style="color:#8fbfdc;">for</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;u</span><span>&gt; Fn(
+</span><span>            &amp;</span><span style="color:#8fbfdc;">&#39;u </span><span>crate::Unimock,
+</span><span>            &amp;</span><span style="color:#8fbfdc;">mut </span><span>core::fmt::Formatter&lt;&#39;_&gt;
+</span><span>        ) -&gt; core::fmt::Result
+</span><span>    ) + Send + Sync;
+</span><span>}
+</span></code></pre>
+<p>The upside is that all mutation patterns are now possible, but the downside is that <code>dyn Fn</code> is a type instead of a bound.</p>
+<p>The unimock user has to supply a value of this type into the <code>answers</code> combinator:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#888888;">// defined as:
+</span><span style="color:#8fbfdc;">impl </span><span>.. {
+</span><span>    </span><span style="color:#888888;">// note: F::AnswerFn (i.e. dyn Fn) must be an unsized type:
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">answers</span><span>(</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">answer_fn</span><span>: &amp;</span><span style="color:#8fbfdc;">&#39;static F::</span><span>AnswerFn) { .. }
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">let</span><span> u = Unimock::new(
+</span><span>    DisplayMock::fmt
+</span><span>        .next_call(matching!(_))
+</span><span>        .answers(&amp;|_, f| write!(f, </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">mocked!</span><span style="color:#556633;">&quot;</span><span>))
+</span><span>);
+</span></code></pre>
+<p>This forces the user to pass a function reference rather than any closure that just happens to implement a given <code>Fn</code> signature like it did before.</p>
+<p>Closure patterns are possible, and unimock supports this, but not in a generic way.
+Closures have to be passed using a different combinator:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl </span><span>.. {
+</span><span>    </span><span style="color:#888888;">// must take an Arc, because userland functions
+</span><span>    </span><span style="color:#888888;">// can&#39;t accept unsized types:
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">answers_arc</span><span>(</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">answer_fn</span><span>: Arc&lt;</span><span style="color:#8fbfdc;">F::</span><span>AnswerFn&gt;) { .. }
+</span><span>}
+</span></code></pre>
+<p>I of course tried to make an abstraction that unites the two APIs, but failed to do so.
+I believe the reason for this is that <em>dyn trait coercion</em> can't be abstracted.</p>
+<h5 id="footnotes">Footnotes</h5>
+<div class="footnote-definition" id="1"><sup class="footnote-definition-label">1</sup>
+<p>For even more background, and a walk-through of Unimock's overall design: <a href="https://audunhalland.github.io/blog/how-to-write-a-type-level-mock-library-in-rust/">How to write a type-level mock library in Rust</a>.</p>
+</div>
+
+</article>
+
+    </main>
+    
+    <footer>
+        
+        &copy; 2024 Audun Halland
+        
+        
+    </footer>
+</body>
+
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+<title>JSON — the relational database’s built-in ORM? - Audun Halland</title>
+
+    
+    <link rel="stylesheet" href="/css/simple.min.css">
+    
+    
+<style>
+pre code span {
+    color: #fff;
+}
+</style>
+
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    
+    
+    
+    
+</head>
+
+<body>
+    <header>
+        
+        <nav>
+            
+            <a href="&#x2F;blog&#x2F;">Blog</a>
+            
+            <a href="&#x2F;about&#x2F;">About</a>
+            
+            <a href="&#x2F;resume&#x2F;">Resume</a>
+            
+            <a href="https:&#x2F;&#x2F;github.com&#x2F;audunhalland">Github</a>
+            
+            <a href="https:&#x2F;&#x2F;mas.to&#x2F;@audunhalland">Mastodon</a>
+            
+        </nav>
+        
+        
+<h1>JSON — the relational database’s built-in ORM?</h1>
+
+    </header>
+    
+    <main>
+        
+<article>
+    
+    <em>Published on: <time>20 Nov 2020</time></em>
+    
+    <p><em>originally posted on <a href="https://knowitlabs.no/json-the-relational-databases-built-in-orm-965bd0905f4d">Knowitlabs</a></em></p>
+<p>Database code. Queries, updates, and deletes. Repositories. Like many other developers, I have struggled with these things that tend to end up rather ugly. Not only might there be a lot of programming language (SQL) embedded inside another programming language (your app’s code), but there are a lot of mappings back and forth for data types, integration code, boilerplate! Or, you might be one of the lucky ones who get to use an Object Relational Mapping-library, clean, simple, and elegant code, right, hiding all of the interesting details? This post is about the quest for the Right Abstraction.</p>
+<p>I’ve used two different relational databases professionally, first SQLite, and then PostgreSQL. I don’t consider myself very experienced in writing database code, but I do think that working with databases is one of the more enjoyable parts of being a developer. Except for that damn mapping code. In my first job, I used an in-house-developed ORM for SQLite, that needed constant modifications to be able to cope with the ever-growing complexity of queries coming from the layers above. ORM development tends to start out very simple: <em>right now I just need to read this or that table as a list</em>. But soon we need foreign keys and querying for trees, and before you know it you’ve reimplemented all the features of SQL itself. Just a lot worse, and what a mess you’re now in.</p>
+<p>I <em>like</em> working with different languages, they exist for a reason, I believe that SQL was designed to be written by humans instead of being a compiler target. I want to use all the cool features from my specific database implementation, and a general-purpose db-agnostic ORM might not support everything.</p>
+<p>So I prefer writing out my SQL statements, but what about the “mapping” code?</p>
+<p>Let’s start with a simple problem that might seem unrelated at first, with the usual boring tables:</p>
+<pre data-lang="sql" style="background-color:#151515;color:#e8e8d3;" class="language-sql "><code class="language-sql" data-lang="sql"><span>CREATE TABLE </span><span style="color:#fad07a;">customer
+</span><span>    id UUID </span><span style="color:#8fbfdc;">PRIMARY KEY </span><span>NOT NULL,
+</span><span>    name </span><span style="color:#8fbfdc;">TEXT</span><span>;CREATE TABLE </span><span style="color:#fad07a;">order
+</span><span>    id UUID </span><span style="color:#8fbfdc;">PRIMARY KEY </span><span>NOT NULL,
+</span><span>    customer_id UUID NOT NULL </span><span style="color:#8fbfdc;">REFERENCES</span><span> customer (id),
+</span><span>    description </span><span style="color:#8fbfdc;">TEXT</span><span>;
+</span></code></pre>
+<p>The task at hand is to query for all customers and all orders for each customer (yes, I want it to be structured). There are several ways to do that. Often, to keep things very simple, the solution might be to issue <a href="https://stackoverflow.com/questions/97197/what-is-the-n1-selects-problem-in-orm-object-relational-mapping">N+1</a> separate queries:</p>
+<pre data-lang="sql" style="background-color:#151515;color:#e8e8d3;" class="language-sql "><code class="language-sql" data-lang="sql"><span>SELECT id, name FROM customer;
+</span></code></pre>
+<p>followed by</p>
+<pre data-lang="sql" style="background-color:#151515;color:#e8e8d3;" class="language-sql "><code class="language-sql" data-lang="sql"><span>SELECT id, description
+</span><span>FROM order
+</span><span>WHERE customer_id = $customer_id;
+</span></code></pre>
+<p>issued for each of those initial rows. But this usually leads to performance issues because of missed optimization opportunities by the RDBMS, so I think we can do better.</p>
+<p>Let’s leave that thought for a while and go back to the problem of deserializing rows into something that’s nice to work within my programming language of choice. For a <em>customer</em>, we usually want some kind of object having the fields <code>id</code> and <code>name</code>. A mapper, in pseudocode, could look like:</p>
+<pre data-lang="javascript" style="background-color:#151515;color:#e8e8d3;" class="language-javascript "><code class="language-javascript" data-lang="javascript"><span style="color:#8fbfdc;">function </span><span style="color:#fad07a;">row_to_customer</span><span>(</span><span style="color:#ffb964;">row</span><span>) {
+</span><span>    </span><span style="color:#fad07a;">Customer</span><span>(</span><span style="color:#ffb964;">id </span><span>= </span><span style="color:#ffb964;">row</span><span>[</span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">id</span><span style="color:#556633;">&#39;</span><span>], </span><span style="color:#ffb964;">name </span><span>= </span><span style="color:#ffb964;">row</span><span>[</span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">name</span><span style="color:#556633;">&#39;</span><span>])
+</span><span>}
+</span></code></pre>
+<p>That’s the type of boilerplate I don’t like writing. But it’s deserialization, and there’s one serialization format that any programming language will be able to deserialize for you (with hopefully very little boilerplate), and that’s <em>JSON</em>. These days I’m mostly using PostgreSQL and it has good support for JSON, and others have too. Let’s rewrite our query:</p>
+<pre data-lang="sql" style="background-color:#151515;color:#e8e8d3;" class="language-sql "><code class="language-sql" data-lang="sql"><span>SELECT
+</span><span>    json_build_object(
+</span><span>        </span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">id</span><span style="color:#556633;">&#39;</span><span>, id,
+</span><span>        </span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">name</span><span style="color:#556633;">&#39;</span><span>, name
+</span><span>    )
+</span><span>FROM customer;
+</span></code></pre>
+<p>And just throw each row at our JSON deserializer, then there’s (almost) no mapping code to write anymore.</p>
+<p>Our initial case with a list of orders for each customer, JSON solves that quite easily as well:</p>
+<pre data-lang="sql" style="background-color:#151515;color:#e8e8d3;" class="language-sql "><code class="language-sql" data-lang="sql"><span>SELECT
+</span><span>    json_build_object(
+</span><span>        </span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">id</span><span style="color:#556633;">&#39;</span><span>, id,
+</span><span>        </span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">name</span><span style="color:#556633;">&#39;</span><span>, name,
+</span><span>        </span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">orders</span><span style="color:#556633;">&#39;</span><span>, (
+</span><span>             SELECT
+</span><span>                 json_agg(
+</span><span>                     json_build_object(
+</span><span>                         </span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">id</span><span style="color:#556633;">&#39;</span><span>, id
+</span><span>                         </span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">description</span><span style="color:#556633;">&#39;</span><span>, description
+</span><span>                     )
+</span><span>                     ORDER BY description
+</span><span>                 )
+</span><span>             FROM order
+</span><span>             WHERE </span><span style="color:#7697d6;">order</span><span>.</span><span style="color:#7697d6;">customer_id </span><span>= </span><span style="color:#7697d6;">customer</span><span>.</span><span style="color:#7697d6;">id
+</span><span>        )
+</span><span>    )
+</span><span>FROM customer;
+</span></code></pre>
+<p><code>json_agg</code> will produce a nested list inside the outer object containing the rows of the subquery, and we’re done, without any additional mapping code, except the language-specific hints potentially needed to deserialize this into the object:</p>
+<pre data-lang="java" style="background-color:#151515;color:#e8e8d3;" class="language-java "><code class="language-java" data-lang="java"><span style="color:#8fbfdc;">class </span><span style="color:#ffb964;">CustomerWithOrders </span><span>{
+</span><span>    id: </span><span style="color:#ffb964;">UUID</span><span>,
+</span><span>    name: </span><span style="color:#ffb964;">String</span><span>,
+</span><span>    orders: </span><span style="color:#ffb964;">Array</span><span>&lt;</span><span style="color:#ffb964;">Order</span><span>&gt;
+</span><span>}
+</span></code></pre>
+<p>I’ve used the JSON/SQL technique with great success lately, especially for queries that involve querying many tables where a single big, fat old JOIN won’t cut it. It’s very fast: The database is allowed to do its own optimizations, and JSON is usually extremely fast to process by the application.</p>
+<p>Could we try a similar thing for insertion?</p>
+<pre data-lang="sql" style="background-color:#151515;color:#e8e8d3;" class="language-sql "><code class="language-sql" data-lang="sql"><span>INSERT INTO order (customer_id, description)
+</span><span>    VALUES (
+</span><span>       ($</span><span style="color:#cf6a4c;">1</span><span>-&gt;&gt;</span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">customer_id</span><span style="color:#556633;">&#39;</span><span>)::UUID,
+</span><span>       $</span><span style="color:#cf6a4c;">1</span><span>-&gt;&gt;</span><span style="color:#556633;">&#39;</span><span style="color:#99ad6a;">description</span><span style="color:#556633;">&#39;
+</span><span>    );
+</span></code></pre>
+<p>Now you only have to bind one parameter instead of two and avoid at least one level of Repeating Yourself.</p>
+<p>Is it fair to call this the <em>database’s built-in ORM</em>? We used json_build_<strong>object</strong>, right? Seriously, I’m not sure, but it was a fun thought anyway.</p>
+<p>I hope you learned a useful programming pattern, at least it took a while for me to discover it.</p>
+
+</article>
+
+    </main>
+    
+    <footer>
+        
+        &copy; 2024 Audun Halland
+        
+        
+    </footer>
+</body>
+
+</html>

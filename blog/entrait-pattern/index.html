@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+<title>The entrait pattern - Audun Halland</title>
+
+    
+    <link rel="stylesheet" href="/css/simple.min.css">
+    
+    
+<style>
+pre code span {
+    color: #fff;
+}
+</style>
+
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    
+    
+    
+    
+</head>
+
+<body>
+    <header>
+        
+        <nav>
+            
+            <a href="&#x2F;blog&#x2F;">Blog</a>
+            
+            <a href="&#x2F;about&#x2F;">About</a>
+            
+            <a href="&#x2F;resume&#x2F;">Resume</a>
+            
+            <a href="https:&#x2F;&#x2F;github.com&#x2F;audunhalland">Github</a>
+            
+            <a href="https:&#x2F;&#x2F;mas.to&#x2F;@audunhalland">Mastodon</a>
+            
+        </nav>
+        
+        
+<h1>The entrait pattern</h1>
+
+    </header>
+    
+    <main>
+        
+<article>
+    
+    <em>Published on: <time>03 Jun 2022</time></em>
+    
+    <p><a href="/blog/testability-reimagining-oop-design-patterns-in-rust/">Last time</a> I presented an idea for a design
+pattern for Rust applications, that can help with testing of business logic. In short, we need a way to
+turn dependencies into <em>inputs</em> when we run tests, so that we can test function bodies as units.</p>
+<p>The last blog post presented some workable ideas, which suffered a bit from being too verbose to write by hand. This time
+I will write about a macro that I named
+<a href="https://docs.rs/entrait/0.3.0/entrait/index.html"><code>entrait</code></a>,
+which removes this boilerplate. The <em>entrait pattern</em> is a certain code style and design technique
+that is used together with the macro.</p>
+<p>To start from the beginning: The main problem we would like to tackle is <em>unit testing</em> of business logic:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>() -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>    your_function() + some_other_function()
+</span><span>}
+</span></code></pre>
+<p>We would like to be able to write a test for <code>my_function</code> that does not depend on any
+implementation details from <code>your_function</code> or <code>some_other_function</code>. Instead we'd like to
+treat these functions differently only when we're testing: We want to explicitly specify
+what these functions are <em>returning</em>, as another kind of input to the function we are <em>testing</em>.</p>
+<h2 id="entrait">Entrait</h2>
+<p><em>Entrait</em> is just a word that I might have invented (not sure!).
+It means to <em>put/enclose something in a trait</em>, and this is just what the macro does.
+When you have written a regular
+function, you can annotate it with <code>entrait</code> to automatically generate a <em>single-method trait</em> based on its signature:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(pub MyFunction)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>() {
+</span><span>}
+</span></code></pre>
+<p>The arguments to entrait is an optional visibility specifier, then the name of the trait to generate.</p>
+<p>The entrait macro operates in <em>append only</em> mode, so the original function is not changed in any way and is outputted verbatim.
+The generated code that gets appended, includes the trait definition:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MyFunction </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span></code></pre>
+<p>along with a generic implementation for <a href="https://docs.rs/implementation/latest/implementation/struct.Impl.html"><code>implementation::Impl</code></a>
+with a <code>Sync</code><sup class="footnote-reference"><a href="#1">1</a></sup> bound for <code>T</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl</span><span>&lt;T&gt; MyFunction for ::</span><span style="color:#ffb964;">implementation</span><span>::</span><span style="color:#ffb964;">Impl</span><span>&lt;T&gt;
+</span><span>    where T: Sync
+</span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        my_function() </span><span style="color:#888888;">// invoking our original function
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>This is the very basics of entrait.</p>
+<h2 id="specifying-dependencies">Specifying dependencies</h2>
+<p>The basic entrait usage is not that interesting in itself. The pattern becomes more interesting when we
+hook up different traits, and make one function depend on another set of functions.</p>
+<p>Consider a Rust <em>method</em>, which has a special <code>self</code>-receiver as its first argument. Entraited functions
+work in a similar way, but instead of the first parameter being a self-receiver, it specifies <em>dependencies</em>.
+The dependencies of an entraited function is a set of traits. We can specify them in the following way:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(MyFunction)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>(
+</span><span>    </span><span style="color:#ffb964;">deps</span><span>: &amp;(</span><span style="color:#ffb964;">impl YourFunction</span><span> + </span><span style="color:#ffb964;">SomeOtherFunction</span><span>),
+</span><span>    </span><span style="color:#ffb964;">some_arg</span><span>: </span><span style="color:#8fbfdc;">i32
+</span><span>) {
+</span><span>    deps.your_function(some_arg);
+</span><span>    deps.some_other_function();
+</span><span>}
+</span></code></pre>
+<p>The macro understands the type syntax of the first parameter, and will adjust its default
+implementation bounds (for <code>Impl&lt;T&gt;</code>) accordingly. The only thing we need to know for now, is that <code>deps</code> will be
+a reference to some type on which we can call the methods <code>your_function</code> and <code>some_other_function</code>.</p>
+<p>Using the dependency notation, we can easily build up complex directed dependency graphs with very little code:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(Foo)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;impl Bar, </span><span style="color:#ffb964;">arg</span><span>: </span><span style="color:#8fbfdc;">i32</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>    deps.bar()
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">entrait</span><span>(Bar)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">bar</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;(</span><span style="color:#ffb964;">impl Baz</span><span> + </span><span style="color:#ffb964;">Qux</span><span>), </span><span style="color:#ffb964;">arg</span><span>: </span><span style="color:#8fbfdc;">i32</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>    deps.baz(arg) + deps.qux(arg)
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">entrait</span><span>(Baz)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">baz</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;impl Qux, </span><span style="color:#ffb964;">arg</span><span>: </span><span style="color:#8fbfdc;">i32</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>    deps.qux(arg) * </span><span style="color:#cf6a4c;">2
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">entrait</span><span>(Qux)]
+</span><span style="color:#888888;">// this function has no dependency bounds:
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">qux</span><span>&lt;T&gt;(_: &amp;T, </span><span style="color:#ffb964;">arg</span><span>: </span><span style="color:#8fbfdc;">i32</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>    arg * arg
+</span><span>}
+</span></code></pre>
+<h2 id="generics-and-application-state">Generics and application state</h2>
+<p>What we have created so far, is generic on two different levels. First of all,
+the function</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(MyFunction)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;impl YourFunction) {
+</span><span>    </span><span style="color:#888888;">// ...
+</span><span>}
+</span></code></pre>
+<p>is generic:</p>
+<ol>
+<li>Because the <code>deps</code> parameter can be <em>any type</em> that implements <code>YourFunction</code>.</li>
+<li>Beacuse the trait implementation provided out of the box, <code>impl&lt;T&gt; MyFunction for implementation::Impl&lt;T&gt;</code>,
+is defined for <em>any</em> <code>T</code>.</li>
+</ol>
+<p>The first kind of genericness is covered in the next section, and is related to real vs. fake
+implementations and <em>mocking</em>.
+The second kind of generic parameter, the <code>T</code> in <code>Impl&lt;T&gt;</code>, is intended to be a <em>placeholder</em> for
+the type that we will choose to represent the <em>state</em> of our concrete application.</p>
+<p>An application often needs e.g. configuration parameters, connection pools, caches, various data it needs
+to operate correctly. An entraited function with generic dependencies can receive any <code>T</code> as application state:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">let</span><span> application: Impl&lt;</span><span style="color:#8fbfdc;">bool</span><span>&gt; = Impl::new(true);
+</span><span>application.my_function();
+</span></code></pre>
+<p>Somewhere, usually deep down in our dependency graph, we would like to perform concrete operations on our
+chosen application state, for example <em>borrowing data</em> from it. Entrait lets you do that very easily, and
+the trick is just to make <code>deps</code> be a reference to that concrete type:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(FetchStuffFromApi)]
+</span><span style="color:#888888;">// still generic:
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">fetch_stuff_from_api</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;impl GetApiUrl) -&gt; Stuff {
+</span><span>    some_http_lib::get(deps.get_api_url())
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">AppConfig </span><span>{
+</span><span>    </span><span style="color:#ffb964;">api_url</span><span>: String,
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">entrait</span><span>(GetApiUrl)]
+</span><span style="color:#888888;">// concrete:
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">get_api_url</span><span>(</span><span style="color:#ffb964;">config</span><span>: &amp;AppConfig) -&gt; &amp;</span><span style="color:#8fbfdc;">str </span><span>{
+</span><span>    &amp;config.api_url
+</span><span>}
+</span></code></pre>
+<p>What will happen now, is that the trait <code>GetApiUrl</code> will only be implemented for <code>Impl&lt;AppConfig&gt;</code>.
+This means that <code>fetch_stuff_from_api</code>, which depends on a type that implements <code>GetApiUrl</code>, in practice
+will inherit that same bound. As soon as we introduced a concrete leaf, our whole application became concretized!</p>
+<h2 id="testing-and-mocking">Testing and mocking</h2>
+<p>So far, we have seen some constructs that enable some degree of abstraction when designing applications.
+The way the <code>deps</code> parameter specifies bounds as a set of traits is a manifestation of the
+<a href="https://en.wikipedia.org/wiki/Dependency_inversion_principle">dependency inversion principle</a>.</p>
+<p>The whole point of this in the first place, was to be able to write a unit test for a function.
+The function we started with was a <code>my_function(..) -&gt; i32</code>
+which sums toghether the outputs of <code>your_function</code> and <code>some_other_function</code>.
+Let's write this using entrait:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(MyFunction)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>(
+</span><span>    </span><span style="color:#ffb964;">deps</span><span>: &amp;(</span><span style="color:#ffb964;">impl YourFunction</span><span> + </span><span style="color:#ffb964;">SomeOtherFunction</span><span>)
+</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>    deps.your_function() + deps.some_other_function()
+</span><span>}
+</span></code></pre>
+<p>To test that this function works, we should be able to give it two numbers, e.g. <code>1</code> and <code>2</code>, and check
+that it in fact produces the number <code>3</code>. If it did that, we can assume that it performed addition correctly.
+We need a way to say that in the test, <code>your_function</code> should have the output value of <code>1</code>, and <code>some_other_function</code>
+should have the output value of <code>2</code>.</p>
+<p>This is where mocking enters the picture. We need <em>mock implementations</em> of the traits <code>YourFunction</code> and <code>SomeOtherFunction</code>,
+and crucially, it must be <em>one type</em> that implements both.</p>
+<h2 id="unimock">Unimock</h2>
+<p>Enter <a href="https://docs.rs/unimock">unimock</a>, a new mock crate that is designed to be the testing companion to <code>entrait</code>. <em>Uni</em> means <em>one</em>,
+and the core idea is that unimock exports one struct, <code>Unimock</code>, which acts as an additional implementation target for
+your traits.</p>
+<p>In entrait, unimock support is opt-in. The basic entrait usage does <em>not</em> generate a mock implementation:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>use entrait::*;
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">entrait</span><span>(YourFunction)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">your_function</span><span>() -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{ todo!() }
+</span></code></pre>
+<p>The mock implementation is added when entrait is imported from an alternative path:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>use entrait::unimock::*;
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">entrait</span><span>(YourFunction)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">your_function</span><span>() -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{ todo!() }
+</span></code></pre>
+<p>When we write it like that, entrait will generate <em>two</em> implementations of <code>YourFunction</code>:</p>
+<ol>
+<li>for <code>implementation::Impl&lt;T&gt;</code></li>
+<li>for <code>unimock::Unimock</code></li>
+</ol>
+<p>If we entrait <code>your_function</code> and <code>some_other_function</code> like this, with unimock implementations,
+we can easily test <code>my_function</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>use unimock::*;
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">test</span><span>]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function_should_add_two_numbers</span><span>() {
+</span><span>    </span><span style="color:#8fbfdc;">let</span><span> deps = mock([
+</span><span>        your_function::Fn::each_call(matching!())
+</span><span>            .returns(</span><span style="color:#cf6a4c;">1</span><span>)
+</span><span>            .in_any_order(),
+</span><span>        some_other_function::Fn::each_call(matching!())
+</span><span>            .returns(</span><span style="color:#cf6a4c;">2</span><span>)
+</span><span>            .in_any_order(),
+</span><span>    ]);
+</span><span>
+</span><span>    assert_eq!(</span><span style="color:#cf6a4c;">3</span><span>, my_function(&amp;deps));
+</span><span>}
+</span></code></pre>
+<h3 id="deeper-integration-tests-with-entrait-and-unimock">Deeper integration tests with entrait and unimock</h3>
+<p>A testing pattern seen in various OOP languages is mocking out business
+logic at an <em>arbitrary distance</em> from the direct function being tested.
+I think in some circles this might be referred to as <em>integration testing</em>.
+Sometimes a deeper integration test is the best testing strategy for a particular problem.</p>
+<p>The real advantage, the <em>crux</em> if you will, about the entrait pattern, is that
+both unit and integration tests (of arbitrary depth!) become very much a reality.</p>
+<p>Recall that our entraited functions are just ordinary, generic functions:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_function</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;(</span><span style="color:#ffb964;">impl YourFunction</span><span> + </span><span style="color:#ffb964;">SomeOtherFunction</span><span>)) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>    deps.your_function() + deps.some_other_function()
+</span><span>}
+</span></code></pre>
+<p><code>deps</code> can be a reference to any type that implements the given traits.
+<code>Unimock</code> matches that criteria, and we pass it into deps to unit test the function.</p>
+<p>What happens when <code>Unimock::your_function()</code> is called? Unimock must be configured before it's used.
+For example, it can match input patterns in order to find some value to return.</p>
+<p>But unimock has another mode, which is called <em>unmocking:</em> Instead of returning a pre-configured value,
+it can be instructed to <em>not mock</em>, but <em>call some implementation</em> instead. Because we used the entrait
+pattern, that implementation is right in our hands, it's that original, handwritten generic function.</p>
+<p>There are two main ways to configure a unimock instance:</p>
+<ol>
+<li><code>unimock::mock(clauses)</code> - Every interaction must be declared up front. If not, you'll get a panic.</li>
+<li><code>unimock::spy(clauses)</code> - Every interaction is <em>unmocked</em> by default.</li>
+</ol>
+<p>A <code>Unimock</code> value created with <code>unimock::spy</code> is an alternative implementation of your entire<sup class="footnote-reference"><a href="#2">2</a></sup> entraited application.
+With that kind of setup, you can start at the other end, i.e. instead of specifying the value of each
+dependency to your unit test, you can instead say which interfaces to <em>mock out</em>. Subtractive instead of additive mocking.</p>
+<h2 id="testing-an-application-s-external-interface">Testing an application's external interface</h2>
+<p>Consider a REST API where we would like to test the interface of the API without invoking the
+application's inner business logic. REST handlers in Rust are usually <code>async fn</code>s passed to some web framework.
+I will present a simple example using <a href="https://docs.rs/axum">axum</a> here:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>async </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">my_handler</span><span>&lt;A&gt;(
+</span><span>    Extension(</span><span style="color:#ffb964;">app</span><span>): Extension&lt;A&gt;
+</span><span>) -&gt; ResponseType
+</span><span>    where A: SomeEntraitMethod + Sized + Clone + Send + Sync + </span><span style="color:#8fbfdc;">&#39;static
+</span><span>{
+</span><span>    app.some_entrait_method()
+</span><span>}
+</span></code></pre>
+<p>We can make a generic Axum <code>Router</code> using the same trait bounds, but duplicating these trait bounds
+for a lot of different endpoints sounds a bit tedious. A solution to that could be to group related
+handlers together in a generic struct, and have the handlers as static methods of that struct:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">MyApi</span><span>&lt;D&gt;(std::marker::PhantomData&lt;D&gt;);
+</span><span>
+</span><span style="color:#8fbfdc;">impl</span><span>&lt;D&gt; </span><span style="color:#ffb964;">MyApi</span><span>&lt;D&gt;
+</span><span>where
+</span><span>    D: SomeEntraitMethod + SomeOtherEntraitMethod + Sized + Clone + Send + Sync + </span><span style="color:#8fbfdc;">&#39;static
+</span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">pub fn </span><span style="color:#fad07a;">router</span><span>() {
+</span><span>        Router::new()
+</span><span>            .route(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">/api/foo</span><span style="color:#556633;">&quot;</span><span>, get(</span><span style="color:#8fbfdc;">Self</span><span>::foo))
+</span><span>            .route(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">/api/bar</span><span style="color:#556633;">&quot;</span><span>, get(</span><span style="color:#8fbfdc;">Self</span><span>::bar))
+</span><span>    }
+</span><span>
+</span><span>    async </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(
+</span><span>        Extension(</span><span style="color:#ffb964;">deps</span><span>): Extension&lt;D&gt;
+</span><span>    ) -&gt; ResponseType {
+</span><span>        deps.some_entrait_method().await
+</span><span>    }
+</span><span>
+</span><span>    async </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">bar</span><span>(
+</span><span>        Extension(</span><span style="color:#ffb964;">deps</span><span>): Extension&lt;D&gt;
+</span><span>    ) -&gt; ResponseType {
+</span><span>        deps.some_other_entrait_method().await
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<h3 id="entrait-and-async">entrait and <code>async</code></h3>
+<p>The last example used <code>async fn</code>, but async functions in traits are not supported out of the box in current Rust.
+The way around that for now is to use <code>#[async_trait]</code>. Entrait supports this by accepting a keyword argument list:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(Foo, async_trait=true)]
+</span><span>async </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>() {
+</span><span>}
+</span></code></pre>
+<p>This has been designed in an opt-in manner to make it more visible that we are paying the cost of heap allocation
+for every function invocation. When Rust one day supports <code>async fn</code> in traits natively, you should be able
+to remove this opt-in feature and things should then work in the same manner as synchronous functions.</p>
+<h2 id="conclusion-and-further-reading">Conclusion and further reading</h2>
+<p>The entrait pattern and related crates are in an experimental state.</p>
+<p>What I'm hoping to achieve with this blog post is some feedback on the ideas and current implementation. I'm hoping
+some people will find the time to try it out, and maybe find flaws in the design that could be improved.</p>
+<p>This blog post does not go into great depth about <code>entrait</code> or <code>unimock</code>.
+You will hopefully find much more useful information if you visit respective rustdoc pages for each crate:</p>
+<table><thead><tr><th>github</th><th>crates.io</th><th>docs.rs</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/audunhalland/entrait">entrait</a></td><td><a href="https://crates.io/crates/entrait/0.3.0">0.3</a></td><td><a href="https://docs.rs/entrait/0.3.0/entrait/index.html">docs</a></td></tr>
+<tr><td><a href="https://github.com/audunhalland/unimock">unimock</a></td><td><a href="https://crates.io/crates/unimock/0.2.0">0.2</a></td><td><a href="https://docs.rs/unimock/0.2.0/unimock/index.html">docs</a></td></tr>
+<tr><td><a href="https://github.com/audunhalland/implementation">implementation</a></td><td><a href="https://crates.io/crates/implementation">0.1</a></td><td><a href="https://docs.rs/implementation">docs</a></td></tr>
+</tbody></table>
+<p>My next plan for entrait is to develop a full-fledged example application. I will likely put it in the <code>examples/</code> directory in the entrait repository.
+Meanwhile, you can take a look at the <a href="https://github.com/audunhalland/entrait/tree/main/tests">tests/</a> directory, which already contains a handful of
+good examples.</p>
+<p>At least I hope that you found some of this to be interesting to read. I surely had an interesting time developing it and writing about it!</p>
+<h5 id="footnotes">Footnotes</h5>
+<div class="footnote-definition" id="1"><sup class="footnote-definition-label">1</sup>
+<p><em>On <code>Sync</code> bound for <code>T</code></em>: <code>T</code> should model an immutable application environment. Entrait is designed to work on multithreaded async executors,
+hence the <code>Sync</code> bound. Mutable caches and similar should be modelled with interior mutability, e.g. <code>Mutex</code>.</p>
+</div>
+<div class="footnote-definition" id="2"><sup class="footnote-definition-label">2</sup>
+<p>There is one kind of function that cannot be automatically unmocked. It's those functions that have non-generic
+<code>deps</code> that should live at the leaf level of a dependency graph:</p>
+</div>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">entrait</span><span>(Foo)]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;SomeConcreteType) {}
+</span></code></pre>
+<p>If you create a default <code>unimock::spy</code>, a call to <code>Unimock::foo</code> will panic. But fortunately, <code>SomeConcreteType</code>
+is not part of <code>Foo::foo</code>'s signature, so it can still be mocked normally.</p>
+
+</article>
+
+    </main>
+    
+    <footer>
+        
+        &copy; 2024 Audun Halland
+        
+        
+    </footer>
+</body>
+
+</html>

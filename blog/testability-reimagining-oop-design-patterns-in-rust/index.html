@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+<title>Testability: Reimagining OOP design patterns in Rust - Audun Halland</title>
+
+    
+    <link rel="stylesheet" href="/css/simple.min.css">
+    
+    
+<style>
+pre code span {
+    color: #fff;
+}
+</style>
+
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    
+    
+    
+    
+</head>
+
+<body>
+    <header>
+        
+        <nav>
+            
+            <a href="&#x2F;blog&#x2F;">Blog</a>
+            
+            <a href="&#x2F;about&#x2F;">About</a>
+            
+            <a href="&#x2F;resume&#x2F;">Resume</a>
+            
+            <a href="https:&#x2F;&#x2F;github.com&#x2F;audunhalland">Github</a>
+            
+            <a href="https:&#x2F;&#x2F;mas.to&#x2F;@audunhalland">Mastodon</a>
+            
+        </nav>
+        
+        
+<h1>Testability: Reimagining OOP design patterns in Rust</h1>
+
+    </header>
+    
+    <main>
+        
+<article>
+    
+    <em>Published on: <time>30 Apr 2022</time></em>
+    
+    <p>I'm going to look at design patterns that enables easy code testability. Most of the code
+I write at work is written in a traditional object-oriented language, and is almost
+exclusively using the pattern known as <strong>Dependency Injection</strong> (DI).</p>
+<p>Quick outline:</p>
+<ol>
+<li>A look into how DI is used in the field, in development environments considered more orthodox than Rust</li>
+<li>A look at typical industry-standard Rust code with questions like <em>is it well tested?</em> If not, <em>Is it easy to change that</em>?</li>
+<li>Look at how good patterns from other languages can be brought to Rust, <em>without also taking the idioms that are foreign to Rust</em>. Take <strong>only</strong> the things tht actually provide value.</li>
+</ol>
+<p>This is the first in a series of posts, with the end goal of presenting a full ergonomic design
+pattern for Rust applications that enables easy testability everywhere.</p>
+<h3 id="testing-terminology">Testing terminology</h3>
+<p>We have some <em>application</em> (a structured computer program) which is fairly modularized. The most interesting module of a modern program is the <em>function</em>.
+We would like to verify that the functions do what they are supposed to do, so we write a <em>test program</em> - a meta program that links
+to the original program. The test program calls the functions of the original program with some inputs, and execute some assertions on
+the outputs.</p>
+<p>If things only were that simple! We forgot that an <em>application</em> usually has very deep call graphs. If we test a very high level
+function, it will usually call into layer upon layer of intermediate steps before returning an answer, and sometimes it will even perform I/O.</p>
+<h4 id="unit-tests">Unit tests</h4>
+<p>Functions are units that represents some computation. When we test a function, we'd like to test <em>only</em> that function,
+<em>the code within that function body</em>. We don't (necessarily) want to test everything else that the function directly or indirectly calls out to.</p>
+<h4 id="business-logic-vs-utilities">Business logic vs. utilities</h4>
+<p>I like to group functions into these two categories. Business logic is deep, but utilities are shallow. An example of a utility
+in the context of an application, could be e.g. <code>HashMap</code>. If the function we are testing uses a HashMap, we just let it do so, because it's
+not considered a Business Logic dependency, it's just a utility.</p>
+<h4 id="inversion-of-control">Inversion of control</h4>
+<p>Business logic will usually depend on <em>lower level</em> business logic. It is typically this kind of dependency we want to &quot;cut off&quot; when
+executing a unit test. In the test, we want to treat the <em>output</em> of the lower level dependency (<code>B</code>) as <em>input</em> to the tested function (<code>A</code>).</p>
+<p>Could we just rewrite the function? Instead of <em>calling</em> <code>B</code> directly for its output, <code>A</code> could just accept it
+as an additional parameter? No, because <code>A</code> would then become a <em>utility</em>! There has to be <em>some code somewhere</em> that connects
+the output of <code>B</code> to the input of <code>A</code>. We would see that <code>A</code> is on the call stack while <code>B</code> is executing. Therefore, it must be modelled
+as a function call.</p>
+<p>So the control flow goes from <code>A</code> to <code>B</code> and then back to <code>A</code>, with <code>B</code>'s answer. But only in release mode. In the unit test
+we'd like to just specify what <code>B</code>s output is, we don't want the call to happen for real. Something external to <code>A</code> needs to
+specify whether the real call to <code>B</code> will happen or not. This is inversion of control (IoC).</p>
+<p>There are different ways of implementing IoC. It can use function pointers, it can use method dispatch, it can use a special configuration parameter.</p>
+<h4 id="dependency-injection">Dependency Injection</h4>
+<p>Dependency Injection (DI) is an implementation of IoC. It usually builds on some kind of method dispach. The <code>B</code> from before could be some
+object named <code>b</code>, with the method <code>b</code>, so <code>A</code> could call <code>b.b()</code>, and since the method call is being dispatched, <code>A</code> has not hard-coded
+its dependency. The <em>injection</em> is to pass a <code>B</code> <em>object instance</em> into <code>A</code>.</p>
+<p>In modern field practice, dependencies are <em>code modules</em> with <em>dispatch functionality</em>. What I mean by that is that one <code>B</code> have many methods that
+can be called, instead of just one. In strictly object oriented languages like Java, every function is part of a class, and most of them
+are typically methods. Java has one class per file, so it will feel natural to put <em>related methods</em> inside <em>the same class</em>. Then it will also
+feel natural to pass around instances of those classes to create dependency graphs.</p>
+<p>I am not sure whether passing a function pointer would classify as DI.</p>
+<h4 id="mocking">Mocking</h4>
+<p>Mocking, broadly, is the practice of injecting <em>test doubles</em> as surrogates for real dependencies when unit tests are executed.</p>
+<p>Java/JVM, which I'm most familiar with, has various mock libraries (Mockito, mockk, etc) that utilize reflection and runtime bytecode generation
+to create alternative implementations based on <em>concrete classes</em> at <em>runtime</em>. That's right, dependencies do not need to be abstract
+interfaces for this to work.</p>
+<h3 id="java-application-architecture">Java application architecture</h3>
+<p>Java was once purely Object Oriented, but has moved towards a more functional style in more recent years. Other, &quot;secondary&quot; JVM languages
+have accelerated this move. But a typical modern Java (or Kotlin) program is still object oriented, and what I'm thinking of
+is of course Dependency modelling, and all of the Domain-Driven-Design names of classes, like <code>FooController</code>, <code>FooService</code>
+and <code>FooRepository</code>. There might be a setup like this:</p>
+<pre data-lang="java" style="background-color:#151515;color:#e8e8d3;" class="language-java "><code class="language-java" data-lang="java"><span style="color:#8fbfdc;">class </span><span style="color:#ffb964;">FooController </span><span>{
+</span><span>    </span><span style="color:#ffb964;">FooService </span><span>fooService;
+</span><span>}
+</span><span>
+</span><span style="color:#888888;">// another file
+</span><span style="color:#8fbfdc;">class </span><span style="color:#ffb964;">FooService </span><span>{
+</span><span>    </span><span style="color:#ffb964;">FooRepository </span><span>fooRepository;
+</span><span>}
+</span></code></pre>
+<p>This is a dependency graph. The classes accept their dependencies as parameters in the constructor. In the running application,
+they get instantiated once, and live for the rest of the program's lifetime.</p>
+<p>This architectural style is ubiquitous, it's an industry standard and accepted best practice.</p>
+<p>To recap:</p>
+<ul>
+<li>Business logic calls are <em>dispatched</em> via a method call to through a reference to another class instance.</li>
+<li>Utilities are just called/instantiated direcly, no dispatch.</li>
+</ul>
+<h4 id="java-testing">Java testing</h4>
+<p>Let's look at the consequence of this pattern in unit tests. We want to <em>mock</em> dependencies.
+We want to test a method of a class, and that class receives dependencies through its constructor.
+There could be <em>many</em> dependencies, and since we run in a test, it's common to mock out
+those dependencies. For example:</p>
+<pre data-lang="java" style="background-color:#151515;color:#e8e8d3;" class="language-java "><code class="language-java" data-lang="java"><span style="color:#ffb964;">FooService</span><span> service = new </span><span style="color:#ffb964;">FooService</span><span>(
+</span><span>    mock&lt;</span><span style="color:#ffb964;">BarService</span><span>&gt;(),
+</span><span>    mock&lt;</span><span style="color:#ffb964;">BazService</span><span>&gt;(),
+</span><span>    mock&lt;</span><span style="color:#ffb964;">QuxService</span><span>&gt;(),
+</span><span>    mock&lt;</span><span style="color:#ffb964;">WyfService</span><span>&gt;(),
+</span><span>);
+</span></code></pre>
+<p>I.e. we create 4 mock objects. So far so good, continuing with:</p>
+<pre data-lang="java" style="background-color:#151515;color:#e8e8d3;" class="language-java "><code class="language-java" data-lang="java"><span style="color:#8fbfdc;">int</span><span> output = service.</span><span style="color:#ffb964;">someMethodThatWeWantToTest</span><span>(</span><span style="color:#cf6a4c;">1</span><span>, </span><span style="color:#cf6a4c;">2</span><span>, </span><span style="color:#cf6a4c;">3</span><span>);
+</span><span style="color:#888888;">// assertEquals(42, output);
+</span></code></pre>
+<p>Does that method call use all those 4 dependencies? We don't really know without looking at its implementation.
+<code>FooService</code> could be a large class
+with a hundred methods that are &quot;somewhat related&quot;. We still had to mock 4 dependencies.</p>
+<p>Of those 4 dependencies, what <em>methods</em> of those dependencies are used within <code>someMethodThatWeWantToTest</code>
+(There <em>could</em> be a hundred methods in each)?
+Also not easy to know without looking at the actual implementation.</p>
+<p>What we have is something that works OK, but in many cases look like over-abstractions, in my view.
+I'm talking about the whole Dependency vs. method <em>inside</em> Dependency duality. In fact, it is the
+<em>called methods</em> which are the <strong>real</strong> dependencies, not the class that contains those methods.
+The dependency to the class instance may be seen as a <em>hack</em> to get method dispatch working.</p>
+<p>But if Java didn't do it that way, there would be 10 times more classes with just a single method
+in each. And if you wanted to have a method that calls 10 other methods, you'd need to pass
+10 different dependency references into it. And those things aren't free!</p>
+<p>We will see if it is possible to improve a bit on this when we come to the Rust section:</p>
+<h3 id="rust-application-architecture">Rust application architecture</h3>
+<p>Rust and the JVM languages have very different designs. In Java you can &quot;hack&quot; the language
+during runtime to enable things that the language wasn't really designed to do. Trying to do something
+like that with Rust would be close to crazy. Rust has no reflection, so it is much
+more limited in the things it might be able to infer during runtime. Rust only does exactly what the
+code says, with very few exceptions.</p>
+<p>That is not to say we cannot have IoC in Rust, we very much can, and the go-to language feature for
+that is <code>trait</code>. In fact we can have zero-cost IoC. So whatever testing design we come up with, it should
+not have performance impact on the finished product. We only pay for what we use, and
+a release build does not include the tests.</p>
+<p>Altough we can use traits to achieve IoC, it's very much opt-in. A standard method call in Rust
+is not dispatched. It's only dispatched if some kind of <em>generics</em> are involved (a zero-cost
+abstraction), and when <code>dyn</code> is used (which is not completely zero cost).</p>
+<h4 id="testing-philosophy-in-rust">Testing philosophy in Rust</h4>
+<p>I think that Rust codebases have traditionally leaned more upon integration testing than unit testing.
+The unit tests that I tend to see there, are usually tests for <em>utilities</em>. Unit-testing
+utilities is easy.</p>
+<p>Business logic seems to get less attention. I don't know the answer why, but it <em>might</em> be because
+there aren't any established design patterns.</p>
+<h4 id="trying-to-port-the-oop-patterns-directly">Trying to port the OOP patterns directly</h4>
+<p>First, we can imagine something like this:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">FooController </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">handle_something</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span></code></pre>
+<p>This is an interface that we need to implement for a type.</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl </span><span>FooController for </span><span style="color:#ffb964;">FooControllerImpl </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">handle_something</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        </span><span style="color:#888888;">// ... the implementation
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Trying to model DI could look something like this:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">FooControllerImpl </span><span>{
+</span><span>    </span><span style="color:#ffb964;">foo_service</span><span>: Box&lt;dyn FooService&gt;,
+</span><span>}
+</span></code></pre>
+<p>But I think there there are several code smells already.</p>
+<ol>
+<li>It's not zero cost
+<ul>
+<li>It requires a heap allocation</li>
+<li>It uses <code>dyn</code>, and therefore dynamic dispatch through a vtable.</li>
+</ul>
+</li>
+<li>It looks Object Oriented, which is <em>probably</em> not the correct paradigm</li>
+<li>It's a little verbose, tedious to write.</li>
+<li>It inherits the many-methods-in-many-dependencies design from OOP</li>
+</ol>
+<p>To mitigate <code>1.</code>, we could make a static dispatch solution:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">FooControllerImpl</span><span>&lt;F&gt; {
+</span><span>    </span><span style="color:#ffb964;">foo_service</span><span>: F,
+</span><span>}
+</span></code></pre>
+<p>But Instead I really want to break this properly apart and try to lose all these &quot;wannabe-class&quot; things.</p>
+<h4 id="modules">Modules</h4>
+<p>In Java, a code module/file always equals a <code>class</code> which somehow needs to be instantiated. Rust just
+has normal code modules, and you usually group together related types, impls, traits and functions
+and put them in the same module. You don't instantiate a Rust module.</p>
+<h4 id="functions-or-methods">Functions or methods?</h4>
+<p>In Rust, it is not always clear whether you should make some computation a <em>function</em> or a <em>method</em>.</p>
+<p>If it is very clear what the <em>subject</em> is that you are operating on, you should probably create a method.
+But a design like the following will appear contrived to many Rust developers:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">FooServiceImpl </span><span>{
+</span><span>    </span><span style="color:#ffb964;">bar_service</span><span>: ?
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span style="color:#ffb964;">FooServiceImpl </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">do_something</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        </span><span style="color:#ffb964;">self</span><span>.bar_service.do_something_else();
+</span><span>    }
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">BarServiceImpl </span><span>{}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span style="color:#ffb964;">BarServiceImpl </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">do_something_else</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Types (<code>struct</code>, <code>enum</code>) should be used to represent the <em>data types</em> in the domain of the
+application. A type like <code>FooServiceImpl</code> is no such thing, and my view is that these have no place
+in a Rust program. I once developed a Rust application at work where I used a Service-oriented
+design, and I wasn't fond of the end result at all. It felt very unnatural to work with.
+These OOP patterns just don't tend to fit well with Rust.</p>
+<p>I'd now like to introduce a design based on combining functions and traits, to achieve <em>static, zero-cost dependency injection</em>.</p>
+<h3 id="zero-cost-di-with-functions-and-traits-the-deps-pattern">zero-cost DI with functions and traits: The <em>&quot;deps-pattern&quot;</em></h3>
+<p>The idea is that some function <code>a</code> has a generic parameter called <code>deps</code> that declares all its
+dependencies as a union of trait bounds.</p>
+<p>An abstract computation that can be depended upon is declared as a trait:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">B </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">b</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span></code></pre>
+<p>The function which depends on <code>B</code>, looks like this:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;impl B) {
+</span><span>    deps.b();
+</span><span>}
+</span></code></pre>
+<p>(<code>impl B</code> is a shorthand notation, it means being generic over some type that implements the trait <code>B</code>)</p>
+<p>Expanding a bit, let's write out the full declarations of both <code>A</code>  and <code>B</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">A </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;impl B) {
+</span><span>    deps.b();
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">B </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">b</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">b</span><span>&lt;T&gt;(</span><span style="color:#ffb964;">deps</span><span>: &amp;T) { </span><span style="color:#888888;">// (T is unbounded, as it&#39;s not used)
+</span><span>    unimplemented!()
+</span><span>}
+</span></code></pre>
+<p>You will notice that the <code>fn a(&amp;self)</code> in <code>A</code> and <code>fn a(deps: &amp;impl B)</code> have similar signatures.
+The difference between them is that the trait exports <em>itself</em> as a dependency, while the function is
+the implementation of that, and declares its <em>own</em> dependencies.</p>
+<p>There's still something missing in this picture though, we don't have a working application yet!
+There is nothing that makes <code>a</code> <em>actually</em> call <code>b</code>.</p>
+<p>To get there, we need a <em>type</em> which will implement both traits <code>A</code> and <code>B</code>, with those
+implementations acting as the final &quot;linking stage&quot;, wiring together  <code>A</code> with <code>a</code> and <code>B</code> with <code>b</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">Application </span><span>{
+</span><span>    </span><span style="color:#888888;">// &quot;state&quot; the app needs to operate.
+</span><span>    </span><span style="color:#888888;">// configuration, connection pools, etc
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>A for </span><span style="color:#ffb964;">Application </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        </span><span style="color:#888888;">// call the _function_ a, defined above.
+</span><span>        </span><span style="color:#888888;">// This compiles, because Application
+</span><span>        </span><span style="color:#888888;">// also implements trait B.
+</span><span>        a(</span><span style="color:#ffb964;">self</span><span>)
+</span><span>    }
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>B for </span><span style="color:#ffb964;">Application </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">b</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        </span><span style="color:#888888;">// call the _function_ b
+</span><span>        b(</span><span style="color:#ffb964;">self</span><span>)
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Neither of the global functions <code>a</code> nor <code>b</code> depend on the Application directly, just on
+their immediate dependencies.</p>
+<p>The <code>Application</code> struct holds all the data the application needs to operate.</p>
+<p><em>Leaf nodes</em> of the dependency graph will often require access to application state.
+Examples of leaf operations could be performing a database operation, other kinds
+of I/O or provide some configuration parameter:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">GetApiUrl </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">get_api_url</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; &amp;</span><span style="color:#8fbfdc;">str</span><span>;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>GetApiUrl for </span><span style="color:#ffb964;">Application </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">get_api_url</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; &amp;</span><span style="color:#8fbfdc;">str </span><span>{
+</span><span>        </span><span style="color:#ffb964;">self</span><span>.config.api_url
+</span><span>    }
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">FetchTodo </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">fetch_todo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">id</span><span>: </span><span style="color:#8fbfdc;">u32</span><span>) -&gt; Todo;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">fetch_todo</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;impl GetApiUrl, </span><span style="color:#ffb964;">id</span><span>: </span><span style="color:#8fbfdc;">u32</span><span>) -&gt; Todo {
+</span><span>    </span><span style="color:#8fbfdc;">let</span><span> url = deps.get_api_url();
+</span><span>    some_http_library.get(format!(</span><span style="color:#556633;">&quot;</span><span style="color:#7697d6;">{url}</span><span style="color:#99ad6a;">/posts/</span><span style="color:#7697d6;">{id}</span><span style="color:#556633;">&quot;</span><span>))
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>FetchTodo for </span><span style="color:#ffb964;">Application </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">fetch_todo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">id</span><span>: </span><span style="color:#8fbfdc;">u32</span><span>) -&gt; Todo {
+</span><span>        fetch_todo(</span><span style="color:#ffb964;">self</span><span>, id)
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>An example showing multiple dependencies:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">A </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">B </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">b</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">C </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">c</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(</span><span style="color:#ffb964;">deps</span><span>: &amp;(</span><span style="color:#ffb964;">impl B</span><span> + </span><span style="color:#ffb964;">C</span><span>)) {
+</span><span>    deps.b();
+</span><span>    deps.c();
+</span><span>}
+</span></code></pre>
+<h4 id="generalizing-the-implementations">Generalizing the implementations</h4>
+<p>The drawback with having a type like <code>Application</code> used everywhere is that each trait implementation needs
+to be aware of the final type that's going to be used. This would make it a bit harder to modularize
+an application into multiple crates, and <code>Application</code> should architecturally exist in one of the most downstream
+crates.</p>
+<p>Take a look at <code>A for Application</code> again:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl </span><span>A for </span><span style="color:#ffb964;">Application </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        a(</span><span style="color:#ffb964;">self</span><span>)
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>This implementation contains no code that actually depends on <code>Application</code>. It just calls the generic function <code>a</code>.
+The only reason <code>Application</code> is used here is that we need something to dispatch from in the first place. We should <em>generalize</em> these
+implementations, so they can live in upstream crates!</p>
+<p>In order to be able to mock our trait <em>and</em> use its real implementation, <code>A</code> must be implemented for two distinct types. Implementing
+it specifically for a mock type and generally for every other type would be disallowed by Rust coherence rules.</p>
+<p>What we need is a <em>Generic Implementation-Providing Smart Pointer™</em>.</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">ImplRef</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;t</span><span>, T: ?Sized&gt;(&amp;</span><span style="color:#8fbfdc;">&#39;t</span><span> T);
+</span></code></pre>
+<p>Every crate would depend on a common micro-crate that just provides this type.
+The impl of function <code>a</code>, as the trait <code>A</code>, depending on trait <code>B</code>, would then look like:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;t</span><span>, T&gt; A for </span><span style="color:#ffb964;">ImplRef</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;t</span><span>, T&gt;
+</span><span>    where ImplRef&lt;</span><span style="color:#8fbfdc;">&#39;t</span><span>, T&gt;: B,
+</span><span>        T: Sync
+</span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">a</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        a(</span><span style="color:#ffb964;">self</span><span>)
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>It's implemented for <em>any</em> <code>T</code>! But what is <code>T</code>? <code>T</code> is the immutable state  of the appliction.</p>
+<p>Now we can also write an <code>AsImpl</code> trait with an <code>as_impl</code> method that has a blanket impl for any type, so we could write this:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">AppState </span><span>{
+</span><span>    </span><span style="color:#888888;">// ... things go here
+</span><span>};
+</span><span>
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">entry_point</span><span>(</span><span style="color:#ffb964;">state</span><span>: AppState) {
+</span><span>    state
+</span><span>        .as_impl() </span><span style="color:#888888;">// -&gt; ImplRef&lt;&#39;_, AppState&gt;
+</span><span>        .a(); </span><span style="color:#888888;">// Call trait method `A::a`, which again calls `fn a`
+</span><span>}
+</span></code></pre>
+<p><code>AppState</code> now gets generically &quot;tunneled&quot; through the system from the entry point
+to dependency leaf nodes. We can &quot;dig out&quot; the AppState at the other side, keeping
+the rest of the application generic:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">INeedAppState </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">i_need_app_state</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>);
+</span><span>}
+</span><span>
+</span><span style="color:#888888;">// non-generic function
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">i_need_app_state</span><span>(</span><span style="color:#ffb964;">app_state</span><span>: &amp;AppState) {
+</span><span>    </span><span style="color:#888888;">// lowest level of business logic,
+</span><span>    </span><span style="color:#888888;">// bottom of the call stack.
+</span><span>    </span><span style="color:#888888;">// From here, only utilities are used.
+</span><span>    </span><span style="color:#888888;">// e.g. a HTTP library
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;t</span><span>&gt; INeedAppState for </span><span style="color:#ffb964;">ImplRef</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;t</span><span>, AppState&gt; {
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">i_need_app_state</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        i_need_app_state(</span><span style="color:#ffb964;">self</span><span>)
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Having this impl in the leaf position, requires all of the application
+to depend on <code>AppState</code>. But <code>ImplRef</code> can be <em>projected</em>, so we could
+call into sub-crates of our application:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">i_need_app_state</span><span>(</span><span style="color:#ffb964;">app_state</span><span>: &amp;AppState) {
+</span><span>    </span><span style="color:#888888;">// Call into the &quot;storage&quot; module:
+</span><span>    </span><span style="color:#888888;">// This is now a new sub-entry-point.
+</span><span>    app_state
+</span><span>        .storage
+</span><span>        .as_impl()
+</span><span>        .fetch_something(); </span><span style="color:#888888;">// call into a deps-pattern subsystem
+</span><span>}
+</span></code></pre>
+<h4 id="real-world-backend-application">Real-world backend application</h4>
+<p>Integrating the &quot;deps-pattern&quot; into a real world backend will be very easy.</p>
+<p>We'll use an <a href="https://docs.rs/axum/latest/axum/">Axum</a> handler as an example:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">let</span><span> app_state = Arc::new(AppState {
+</span><span>    </span><span style="color:#888888;">/* all the required configuration and state, etc */
+</span><span>});
+</span><span>
+</span><span style="color:#8fbfdc;">let</span><span> axum_app = Router::new()
+</span><span>    .route(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">/</span><span style="color:#556633;">&quot;</span><span>, get(handler_as_entry_point))
+</span><span>    .layer(Extension(app_state));
+</span><span>
+</span><span>async </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">handler_as_entry_point</span><span>(
+</span><span>    Extension(</span><span style="color:#ffb964;">state</span><span>): Extension&lt;Arc&lt;AppState&gt;&gt;,
+</span><span>) {
+</span><span>    state
+</span><span>        .as_impl()
+</span><span>        .my_top_level_business_logic()
+</span><span>        .await
+</span><span>}
+</span></code></pre>
+<p>Note that in an <code>async</code> context, the deps-pattern wouldn't be free, because
+futures would need to be boxed since they are defined through a trait.
+But fortunately, that is <a href="https://github.com/rust-lang/rust/issues/91611">soon about to change</a> for the better.</p>
+<h3 id="conclusion-evaluating-the-deps-pattern">Conclusion: Evaluating the deps-pattern</h3>
+<p>We have managed to flatten our earlier dependency graph (which was based on
+an <em>actual</em> in-memory graph of references) to something where the dependency
+graph is just a compile-time concept.</p>
+<p>We have gotten rid of unnecessary and contrived types from the application,
+and can continue to model it with normal functions. We can have <em>high level</em>
+business logic depend on <em>low level</em> business logic, and we have Inversion of Control
+since it's all based on trait bounds. And (almost) everything should be zero cost.</p>
+<p>In unit tests, we can provide alternative implementations of the traits
+depended upon.</p>
+<p><em>There is one great disadvantage though.</em> Can you guess it? It's the verbosity and all the boilerplate code.
+The final pattern that I present will solve that isssue. Yes,
+it will involve the use of macros! And yes, that will be presented in the next post,
+because this is the end of this one.</p>
+
+</article>
+
+    </main>
+    
+    <footer>
+        
+        &copy; 2024 Audun Halland
+        
+        
+    </footer>
+</body>
+
+</html>

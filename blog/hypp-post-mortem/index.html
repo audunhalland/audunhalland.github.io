@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+<title>Hypp post mortem - Audun Halland</title>
+
+    
+    <link rel="stylesheet" href="/css/simple.min.css">
+    
+    
+<style>
+pre code span {
+    color: #fff;
+}
+</style>
+
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    
+    
+    
+    
+</head>
+
+<body>
+    <header>
+        
+        <nav>
+            
+            <a href="&#x2F;blog&#x2F;">Blog</a>
+            
+            <a href="&#x2F;about&#x2F;">About</a>
+            
+            <a href="&#x2F;resume&#x2F;">Resume</a>
+            
+            <a href="https:&#x2F;&#x2F;github.com&#x2F;audunhalland">Github</a>
+            
+            <a href="https:&#x2F;&#x2F;mas.to&#x2F;@audunhalland">Mastodon</a>
+            
+        </nav>
+        
+        
+<h1>Hypp post mortem</h1>
+
+    </header>
+    
+    <main>
+        
+<article>
+    
+    <em>Published on: <time>27 Apr 2022</time></em>
+    
+    <p>Last year I spent a lot of time trying to make a proof-of-concept Rust GUI/web framework
+called <a href="https://github.com/audunhalland/hypp">Hypp</a>. It takes inspiration from
+Svelte, and uses a complex procedural macro to define components.</p>
+<p>I wanted to design a syntax that is a hybrid of HTML and Rust code,
+and I think it succeds at some things and fails at others.</p>
+<p>A code example taken from its <code>tests</code> directory:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>component! {
+</span><span>    Toggle(prop1: </span><span style="color:#8fbfdc;">bool</span><span>, prop2: &amp;</span><span style="color:#8fbfdc;">str</span><span>) {
+</span><span>        toggled: </span><span style="color:#8fbfdc;">bool</span><span>,
+</span><span>    }
+</span><span>
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">handle_click</span><span>(&amp;</span><span style="color:#8fbfdc;">mut </span><span style="color:#ffb964;">self</span><span>) {
+</span><span>        *</span><span style="color:#ffb964;">self</span><span>.toggled = !*</span><span style="color:#ffb964;">self</span><span>.toggled;
+</span><span>    }
+</span><span>
+</span><span>    &lt;div&gt;
+</span><span>        </span><span style="color:#8fbfdc;">if</span><span> prop1 {
+</span><span>            &lt;p&gt;</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">yep</span><span style="color:#556633;">&quot;</span><span>&lt;/p&gt;
+</span><span>        }
+</span><span>    &lt;/div&gt;
+</span><span>    &lt;div&gt;
+</span><span>        &lt;button onClick={</span><span style="color:#8fbfdc;">Self</span><span>::handle_click}&gt;
+</span><span>            </span><span style="color:#8fbfdc;">if</span><span> toggled {
+</span><span>                </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">Toggled</span><span style="color:#556633;">&quot;
+</span><span>            } </span><span style="color:#8fbfdc;">else </span><span>{
+</span><span>                </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">Not toggled</span><span style="color:#556633;">&quot;
+</span><span>            }
+</span><span>        &lt;/button&gt;
+</span><span>    &lt;/div&gt;
+</span><span>}
+</span></code></pre>
+<p>Everything related to one reusable component is written within the proc macro <code>component</code>,
+which enables the macro to make some wild optimizations.</p>
+<p>First, an analysis of what this code means. At first we see a construct like
+<code>Name(arguments...) { state_variables... }</code>. That's the name of the component,
+its parameters, and its internal state. Then there's an <code>fn</code> definition which
+is a callback function that can be used within the <em>body</em>, which is
+the last main syntax element. The body is a markup template language, and
+will look familiar to many.</p>
+<h3 id="the-nice-features-in-hypp-that-i-actually-got-working">The nice features in Hypp that I actually got working</h3>
+<h4 id="nice-jsx-like-syntax-featuring-rust-keywords-in-markup-templates">Nice JSX-like syntax featuring Rust keywords in markup templates</h4>
+<p>The markup syntax supports <code>if</code>, <code>for</code> and <code>match</code>! It only needs to look at a
+few things to know what kind of &quot;element&quot; something is. A <code>&lt;</code>
+starts some markup element expression. A known Rust keyword
+starts some &quot;evaluation&quot; (conditional or repetition).
+A <code>{</code> will start a string-evaluation expression. This means
+that there is no awkward syntax to &quot;escape out&quot; to reach
+evaluation mode, but it also requires <em>literal text</em> to be
+<code>&quot;double-quoted&quot;</code>. In my opinion that syntax works out very nicely,
+the code appears clean and readable.</p>
+<h4 id="update-optimizations-and-data-flow-analysis">Update optimizations and data-flow analysis</h4>
+<p>When you create a new reactive GUI framework, you absolutely need to have all
+the cool optimizations as selling points! Most optimizations in web frameworks
+are of the form <em>don't update DOM if nothing changed</em>. I went for an architecture
+where I wanted to avoid comparing new/old model values as much as possible.
+Along with each passed parameter to a <em>redraw</em>-like instruction, Hypp sends
+along whether some parameter has changed from the parent component to the child
+component. The child component then tracks data flow from its input definitions
+out to its leaf nodes where it passes those parameters on.</p>
+<p>So a Hypp component makes a quick check at the start of its <em>update</em> procedure
+to see which parts of its markup tree needs to be updated. Some parts of the
+tree will be <em>constant</em>, i.e. they don't depend on any variables. These parts
+of the tree will only be created once, then never touched again. <em>Variable</em>
+parts will get patched in and out between these constant parts.</p>
+<h4 id="server-side-rendering">Server side rendering</h4>
+<p>From the start I designed Hypp with multiple backends in mind. I think that
+turned out well.</p>
+<h4 id="use-of-generic-associated-types">Use of Generic Associated Types</h4>
+<p>Hypp is GAT-heavy, and I utilized it to such a degree that I stumbled upon
+several bugs in the Rust compiler, I even <a href="https://github.com/rust-lang/rust/pull/89341">fixed one</a>!</p>
+<p>In the end though, I think I refactored the code so the fix wasn't necessary for Hypp after all.
+But I can definitely say that Hypp directly lead to actual improvements in the Rust language!</p>
+<h3 id="what-didn-t-work-so-well">What didn't work so well</h3>
+<h4 id="too-much-macroifization">Too much macroifization</h4>
+<p>I don't like that everything has to be inside one big macro. But I think it needs to,
+to be able to see everything that's part of the component at the same time. There
+is a lot of analysis going on. All the conditionals and loops need to be translated
+into a state machine, the component instances need to store all of this, along with
+its input parameters. It needs to store its last input parameters in case it gets
+a direct signal that it needs to update (e.g. an event happened like a button click).
+In that case it may have to send those parameters to <em>child components</em> that were
+potentially invisible (not instantiated) before that event.</p>
+<p>The macro generates a <em>lot</em> of Rust code, more than I would have thought at first.
+I put in significant effort to reduce every possible code duplications. Somehow
+I don't like that the component looks small and elegant expressed in surface syntax,
+but compiles down to a monstrosity.</p>
+<h4 id="event-propagation">Event propagation</h4>
+<p>I never got this part right. The problems with event handling can be found quite
+easily in Hypp's Todo example app. It gets into a never-ending update loop.</p>
+<p>At this point I lost the motivation. It didn't think it was fun anymore, there
+were too much refactoring of everything everywhere just to make tiny adjustments.</p>
+<h4 id="loose-ends-and-scope-of-project">Loose ends and scope of project</h4>
+<p>Hypp started out as a syntax experiment, and it escalated. I find meta-programming
+too interesting.</p>
+<p>A project like this can never really be &quot;done&quot; because its
+scope is very hard to define. To take it somewhere remotely close to production quality
+is way too big a task for a hobby project developed during the night.</p>
+<p>It was (almost too much) fun while it lasted. My next projects will try to have a more
+focused scope.</p>
+
+</article>
+
+    </main>
+    
+    <footer>
+        
+        &copy; 2024 Audun Halland
+        
+        
+    </footer>
+</body>
+
+</html>

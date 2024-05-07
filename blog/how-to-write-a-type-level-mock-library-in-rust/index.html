@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+<title>How to write a type-level mock library in Rust - Audun Halland</title>
+
+    
+    <link rel="stylesheet" href="/css/simple.min.css">
+    
+    
+<style>
+pre code span {
+    color: #fff;
+}
+</style>
+
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    
+    
+    
+    
+</head>
+
+<body>
+    <header>
+        
+        <nav>
+            
+            <a href="&#x2F;blog&#x2F;">Blog</a>
+            
+            <a href="&#x2F;about&#x2F;">About</a>
+            
+            <a href="&#x2F;resume&#x2F;">Resume</a>
+            
+            <a href="https:&#x2F;&#x2F;github.com&#x2F;audunhalland">Github</a>
+            
+            <a href="https:&#x2F;&#x2F;mas.to&#x2F;@audunhalland">Mastodon</a>
+            
+        </nav>
+        
+        
+<h1>How to write a type-level mock library in Rust</h1>
+
+    </header>
+    
+    <main>
+        
+<article>
+    
+    <em>Published on: <time>11 Apr 2023</time></em>
+    
+    <p><a href="https://docs.rs/unimock/latest/unimock/">Unimock 0.5</a> is just out, and I wanted to reflect on how it came to be, how its design emerged and various implementation challenges along the way.</p>
+<h2 id="why-unimock-exists">Why unimock exists</h2>
+<p>Rust already has a number of mocking solutions, like the popular <a href="https://docs.rs/mockall/latest/mockall/">mockall</a>. Why another one?</p>
+<p>The idea behind unimock comes from the observation that Rust traits form some kind of graph:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#888888;">// There is a supertrait relationship between Foo and Bar:
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Foo</span><span>: Bar {}
+</span></code></pre>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">A </span><span>{}
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">B </span><span>{}
+</span><span>
+</span><span style="color:#888888;">// A and B are related via the fact that some type T needs to implement both:
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">func</span><span>&lt;T&gt;(</span><span style="color:#ffb964;">t</span><span>: T) where T: A + B {}
+</span></code></pre>
+<p>To be maximally flexible, a trait mocking library needs to support all combinations of trait bounds.
+If we wanted to write a test implementation of <code>Foo</code>, we'd also have to write one for <code>Bar</code>.
+If we want to test <code>func</code>, the test type needs to implement both <code>A</code> and <code>B</code>.</p>
+<p>Ultimately, there is only one possibility: All the traits need to be implemented by <em>the same type</em>!</p>
+<p>This challenge first appeared while I experimented with <a href="https://docs.rs/entrait/latest/entrait/">entrait</a>, which is entirely made up of a trait graph.
+I quickly hit a road block when trying to use <code>mockall</code> as a test tool, because it uses one type per mocked trait.
+The next sections are modelled as a walkthrough on how a universal Unimock-like mocker can be (and is!) implemented, and some of the design challenges are discussed.</p>
+<p>By <em>&quot;type-level&quot; mocker</em>, I mean a library that relies more on generics, traits and bounds than lots of macro-generated custom code blocks.
+Unimock, although it comes with a fairly complex procedural macro that does trait parsing and analysis, is a type-level mocker.
+The macro's job is to figure out what types to define!</p>
+<h2 id="implementing-a-simple-mocker-from-scratch">Implementing a simple mocker from scratch</h2>
+<p>Let's start with a simple trait.</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Foo </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32</span><span>;
+</span><span>}
+</span></code></pre>
+<p>We'd like to mock it! We want to start out with a type that can return a configurable <code>i32</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">Mocker</span><span>(</span><span style="color:#8fbfdc;">i32</span><span>);
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>Foo for </span><span style="color:#ffb964;">Mocker </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>        </span><span style="color:#ffb964;">self</span><span>.</span><span style="color:#cf6a4c;">0
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>We've created a simple mock library!
+But now let's reuse that type for another trait:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Bar </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">bar</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; String;
+</span><span>}
+</span></code></pre>
+<p>Now the <code>Mocker</code> needs two fields: An <code>i32</code> and a <code>String</code>.
+Going on like this can't scale forever, so we need to look at some more dynamic solutions.</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">Mocker </span><span>{
+</span><span>    </span><span style="color:#ffb964;">return_values</span><span>: HashMap&lt;TypeId, Box&lt;dyn Any&gt;&gt;,
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>Foo for </span><span style="color:#ffb964;">Mocker </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>        </span><span style="color:#8fbfdc;">let</span><span> ret = </span><span style="color:#ffb964;">self</span><span>.return_values.get(&amp;TypeId::of::&lt;</span><span style="color:#8fbfdc;">i32</span><span>&gt;()).unwrap();
+</span><span>        ret.downcast_ref::&lt;</span><span style="color:#8fbfdc;">i32</span><span>&gt;().unwrap().clone()
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>This looks more dynamic and using <code>Any</code> and <code>TypeId</code> seems like a good idea, but there are two problems:</p>
+<ol>
+<li>All methods that return <code>i32</code> has to return the same value.</li>
+<li>All return types need to be <code>'static</code> in order to implement <code>Any</code>.</li>
+</ol>
+<p>We have to be able to control each trait method individually from any other trait method.
+Rust trait methods are not types, and cannot implement any traits (i.e. <code>Any</code>).</p>
+<p>This can be solved by defining a new type per method:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#888888;">// module which represents the trait
+</span><span style="color:#8fbfdc;">mod </span><span style="color:#ffb964;">FooMock </span><span>{
+</span><span>    </span><span style="color:#888888;">// struct which represents the method
+</span><span>    </span><span style="color:#8fbfdc;">pub struct </span><span style="color:#ffb964;">foo</span><span>;
+</span><span>}
+</span></code></pre>
+<p>And defining each method's return type through a new trait with an associated type:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#888888;">// &#39;static makes this automatically implement Any
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn</span><span>: &#39;static {
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Output</span><span>;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>MockFn for </span><span style="color:#ffb964;">FooMock</span><span>::</span><span style="color:#ffb964;">foo </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Output </span><span>= </span><span style="color:#8fbfdc;">i32</span><span>;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">Mocker </span><span>{
+</span><span>    </span><span style="color:#ffb964;">return_values</span><span>: HashMap&lt;TypeId, Box&lt;dyn Any&gt;&gt;,
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span>Foo for </span><span style="color:#ffb964;">Mocker </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; </span><span style="color:#8fbfdc;">i32 </span><span>{
+</span><span>        </span><span style="color:#8fbfdc;">let</span><span> return_value = </span><span style="color:#ffb964;">self
+</span><span>            .return_values
+</span><span>            .get(&amp;TypeId::of::&lt;</span><span style="color:#8fbfdc;">FooMock::</span><span>foo&gt;())
+</span><span>            .unwrap();
+</span><span>        return_value.downcast_ref::&lt;</span><span style="color:#8fbfdc;">i32</span><span>&gt;().unwrap().clone()
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>What's the point of the <code>Output</code> associated type? It's not used at all in <code>impl Foo for Mocker</code>.</p>
+<p>Before the mocker can be used, the user needs to specify which return values each method will have.
+It would not be a very good idea if the interface to configure the mocker exposed <code>Box&lt;dyn Any&gt;</code>.
+So we'll design the configuration API around this associated type, and box the return value internally:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl </span><span style="color:#ffb964;">Mocker </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">pub fn </span><span style="color:#fad07a;">should_return</span><span>&lt;F: MockFn&gt;(&amp;</span><span style="color:#8fbfdc;">mut </span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">value</span><span>: </span><span style="color:#8fbfdc;">F::</span><span>Output)
+</span><span>        where </span><span style="color:#8fbfdc;">F::</span><span>Output: </span><span style="color:#8fbfdc;">&#39;static
+</span><span>    {
+</span><span>        </span><span style="color:#ffb964;">self</span><span>.return_values.insert(TypeId::of::&lt;F&gt;(), Box::new(value));
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Now we have implemented two phases of the mocking lifecycle: <em>Configuration</em> and <em>interaction</em>.
+The two phases are galvanically isolated but still type safe by the use of <code>dyn Any</code>.</p>
+<p>There is still a problem that return values must be <code>'static</code>.
+This can be solved by using an internal <code>enum</code> with two variants:</p>
+<ol>
+<li>A <code>Box&lt;Any&gt;</code> representing a <code>'static</code> return value</li>
+<li>A <code>Box&lt;Any&gt;</code> representing a <em>static closure</em> that returns <code>F::Output</code> directly (and postpone the problem with what it actually references with its non-static lifetime).</li>
+</ol>
+<h3 id="returning-references">Returning references</h3>
+<p>The return values currently supported are owned types, including <code>&amp;'static T</code>.
+There is no way to put non-static references into that hash map.</p>
+<p>What kind of references could we expect to support?
+The archetypal pattern is likely some variation of this with the elided self-lifetime:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Foo </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; &amp;</span><span style="color:#8fbfdc;">str</span><span>;
+</span><span>}
+</span></code></pre>
+<p>To support this, the mocker has to store an owned version of the return value and return a reference to it.
+This already indicates that the configuration and interaction phases do not necessarily use the same types.
+We could configure the mocker with a <code>String</code> and then return a <code>&amp;str</code> of it later.</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Output</span><span>;
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Response</span><span>: AsRef&lt;</span><span style="color:#8fbfdc;">Self::</span><span>Output&gt;;
+</span><span>}
+</span></code></pre>
+<p>This is a start, but now <em>all</em> outputs must be references of the response, that is not what we wanted.
+What we need is a way to tell the mocker the &quot;general category&quot; of output: Owned or Borrowed.
+Let's introduce a new trait:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Respond </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Type</span><span>: </span><span style="color:#8fbfdc;">&#39;static</span><span>;
+</span><span>}
+</span></code></pre>
+<p>The <code>Type</code> is the owned version of the type that is allowed to be stored in the hash map.</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">Owned</span><span>&lt;T&gt;(PhantomData&lt;T&gt;);
+</span><span>
+</span><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">Borrowed</span><span>&lt;T: ?Sized + &#39;static&gt;(PhantomData&lt;T&gt;);
+</span></code></pre>
+<p>These are the two current variants.
+To wire things up, we need yet another trait:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Output</span><span>&lt;&#39;a, R: Respond&gt; {
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Type</span><span>;
+</span><span>
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">from_response</span><span>(</span><span style="color:#ffb964;">response</span><span>: </span><span style="color:#8fbfdc;">R::</span><span>Type) -&gt; </span><span style="color:#8fbfdc;">Self::</span><span>Type;
+</span><span>}
+</span></code></pre>
+<p>Let's start by implementing <code>Owned</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl</span><span>&lt;T: </span><span style="color:#8fbfdc;">&#39;static</span><span>&gt; Respond for </span><span style="color:#ffb964;">Owned</span><span>&lt;T&gt; {
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Type </span><span>= T;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">impl</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>, T: </span><span style="color:#8fbfdc;">&#39;static</span><span>&gt; Output&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>, </span><span style="color:#8fbfdc;">Self</span><span>&gt; for </span><span style="color:#ffb964;">Owned</span><span>&lt;T&gt; {
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Type </span><span>= T;
+</span><span>
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">from_response</span><span>(</span><span style="color:#ffb964;">response</span><span>: </span><span style="color:#8fbfdc;">R::</span><span>Type) -&gt; </span><span style="color:#8fbfdc;">Self::</span><span>Type {
+</span><span>        response
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>These implementations express that an <code>Output::Type</code> is an &quot;identity transformation&quot; from <code>Respond::Type</code> in the case of <code>Owned&lt;T&gt;</code>.
+Notice the <code>'a</code> lifetime introduced in the <code>Output</code> trait.
+This lifetime represents borrowing from the mocker, and we will need it when implementing <code>Borrowed</code>.</p>
+<p>But first, we have to change <code>MockFn</code> to use our new traits, and now we'll need a Generic Associated Type:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Response</span><span>: Respond;
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Output</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>&gt;: Output&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>, </span><span style="color:#8fbfdc;">Self::</span><span>Response&gt;;
+</span><span>}
+</span></code></pre>
+<p>The bounds on these types illustrate how <code>Response</code> and <code>Output</code> are connected.
+The output must be an Output that can be constructed from the response, and the output is allowed to be a reference.</p>
+<p>Now over to <code>Borrowed</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl</span><span>&lt;T: ?</span><span style="color:#ffb964;">Sized</span><span> + </span><span style="color:#8fbfdc;">&#39;static</span><span>&gt; </span><span style="color:#ffb964;">Respond for Borrowed</span><span>&lt;T&gt; {
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Type </span><span>= Box&lt;dyn std::borrow::Borrow&lt;T&gt; + Send + Sync&gt;;
+</span><span>}
+</span></code></pre>
+<p>The type stored in the hash map is any type from which we can <code>Borrow</code> a <code>T</code>.
+For example, <code>String</code> in the case of <code>&amp;str</code>. (If we want <code>Mocker</code> to be thread safe we need Send and Sync bounds.)</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">impl</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>, T: ?</span><span style="color:#ffb964;">Sized</span><span> + </span><span style="color:#8fbfdc;">&#39;static</span><span>&gt; </span><span style="color:#ffb964;">Output</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;a</span><span>, </span><span style="color:#8fbfdc;">Self</span><span>&gt; </span><span style="color:#ffb964;">for Borrowed</span><span>&lt;T&gt; {
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Type </span><span>= &amp;</span><span style="color:#8fbfdc;">&#39;a</span><span> T;
+</span><span>
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">from_response</span><span>(
+</span><span>        </span><span style="color:#ffb964;">response</span><span>: &lt;</span><span style="color:#8fbfdc;">Self </span><span>as Respond&gt;::Type,
+</span><span>    ) -&gt; </span><span style="color:#8fbfdc;">Self::</span><span>Type {
+</span><span>        panic!(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">Dang, cannot return borrow of a local</span><span style="color:#556633;">&quot;</span><span>)
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Here is the next spanner in the works.
+We want to borrow the <code>Respond::Type</code>, but can't, since it is being passed by-value into the <code>from_response</code> function.
+Now you might object that the <code>from_response</code> design is wrong.
+Why is it passed an owned response when it could just borrow directly from the mocker's hash table?
+Some paragraphs ago we said that the hash table can contain one of two things: An owned response and a closure that produces an owned response.
+So we need to handle the ephemeral owned response anyway: Yes, returning a reference to something just produced by a function.</p>
+<p>Finding a (safe) solution to this problem was not easy.
+I needed some kind of data structure that can convert <code>T</code>'s to <code>&amp;'self T</code>'s.
+It needs to use interior mutability, or else we can't get <code>&amp;T</code>'s out.
+Once a <code>T</code> has been added to the structure, that <code>T</code> can't ever be touched until <code>drop</code>, or else the <code>&amp;T</code> would be invalid.
+The end solution involves a <a href="https://docs.rs/once_cell/latest/once_cell/">once_cell</a> chain, the code can be found in the unimock repo.</p>
+<p>In Unimock, there are even more variants of <code>Respond</code>/<code>Output</code>, the most notable one is called <code>Mixed&lt;T&gt;</code>.
+<code>Mixed</code> is used in Owned/Borrowed tree-like situations, for example with the following signatures:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Foo </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">f1</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; Option&lt;&amp;</span><span style="color:#8fbfdc;">str</span><span>&gt;;
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">f2</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>) -&gt; (String, &amp;String);
+</span><span>}
+</span></code></pre>
+<h3 id="observing-parameters">Observing parameters</h3>
+<p>So in addition to outputs, functions also have inputs.</p>
+<p>In a typical mocking situation we want to test some code that calls into a trait.
+The trait implementation would like to check that it receives some expected parameter value, and react accordingly.
+&quot;Reacting accordingly&quot; is to be understood as &quot;returning some specific output&quot;.</p>
+<p>This parameter observation business is also something that happens at interaction time, but is specified up front at configuration time.</p>
+<p>Let's extend the <code>MockFn</code> trait with some inputs:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">type </span><span style="color:#ffb964;">Inputs</span><span>&lt;</span><span style="color:#8fbfdc;">&#39;i</span><span>&gt;;
+</span><span>    </span><span style="color:#888888;">// ..
+</span><span>}
+</span></code></pre>
+<p>When the function has multiple inputs it will use a tuple.
+The <code>'i</code> lifetime is quite handy.
+As long as the parameters are immutable, the same lifetime can be used for all of them.
+(<code>&amp;mut</code> on the other hand, can not be modelled this way. I won't get into this in this article, but it's related to <a href="https://github.com/rust-lang/rust/issues/100013">unexpected higher-ranked lifetime error in GAT usage</a>)</p>
+<p>So, the mocker receives some <code>Inputs</code> and wants to produce an <code>Output</code>.
+The user has to control which inputs map to which output.
+It's not possible to just put the inputs in any kind of table, because that would require trait bounds.
+Instead the user needs to supply a function that receives a reference to the inputs, and returns whether it is a &quot;match&quot; or not.</p>
+<p>Something like:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>|inputs| matches!(inputs, (</span><span style="color:#cf6a4c;">1</span><span>, </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">2</span><span style="color:#556633;">&quot;</span><span>, </span><span style="color:#cf6a4c;">3.0</span><span>))
+</span></code></pre>
+<p>This closure type can be converted into to <code>Box&lt;Any&gt;</code> and stored together with the return values in the hash map.</p>
+<p>Except, it's not that easy.
+This solution &quot;works&quot;, but is quite hard to debug when the user <em>expects</em> a match that for some reason doesn't at runtime.
+The mocker could panic with a message that it found no response for the given inputs, but it would be handy to see <em>why</em> there was a mismatch.
+(In mocking terminology, a proper mock is something you <em>expect</em> to be called.
+If it isn't, that's an error.)</p>
+<p>Another annoying issue with the <code>matches!</code> approach is the lack of <a href="https://github.com/rust-lang/rust/issues/87121">Deref patterns</a>.
+I.e. if one of the inputs is of type <code>String</code>, it can't be matched with a <code>&quot;string literal&quot;</code>.
+This is one of the most annoying missing features in Rust for me personally.
+So what I wanted for Unimock was a higher level macro for input matching, that encapsulates the closue syntax (it produces a closure) and has some plumbing that works around some of the missing Deref patterns issues.</p>
+<p>The macro is called <code>matching!</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>matching!(</span><span style="color:#cf6a4c;">1</span><span>, </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">2</span><span style="color:#556633;">&quot;</span><span>, </span><span style="color:#cf6a4c;">3.0</span><span>)
+</span></code></pre>
+<p>It basically expands to a pattern match on the arguments, along with useful diagnostics in the case of an unsuccessful match.
+Every string literal is matched using <code>AsRef&lt;str&gt;</code>.</p>
+<p>The input matching was not the hardest part to design.
+Now let's move to the part that is most visible to users.</p>
+<h2 id="the-configuration-phase">The configuration phase</h2>
+<p>The configuration phase is what happens first (at the top of the test) and really ties all the parts toghether.
+It's also the API that users have to suffer through actually using, API ergonomics should be in the front seat!</p>
+<p>First some general observations about the mock configuration phase.</p>
+<ul>
+<li>The mocker is either configured or it's not configured.
+This implies some kind of builder pattern, where you are either in the configuration phase or interaction phase, enforced by type state.</li>
+<li>People like to write reusable code. It should be easy to factor out parts of the configuration phase to be reused many times.</li>
+<li>It should not be too verbose.</li>
+<li>It should not be too cryptic.</li>
+<li>Not too much <code>rustfmt</code> indentation whitespace.</li>
+<li><code>rustfmt</code> indentation should visually group things in a logical way.</li>
+</ul>
+<p>Let's start with a <code>MockBuilder</code> first:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>MockBuilder::new()
+</span><span>    .add(FooMock::foo)
+</span><span>    .inputs(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>    .returns(</span><span style="color:#cf6a4c;">2</span><span>)
+</span><span>    .next()
+</span><span>    .add(..)
+</span><span>    </span><span style="color:#888888;">// ...
+</span><span>    .build()
+</span></code></pre>
+<p>This API is not that nice because there is no grouped indentation for one &quot;unit of mock&quot;.
+It's also too verbose for my taste, needing method calls like <code>.add</code> and <code>.inputs</code> which don't add information.</p>
+<p>Let's look at defining an API for a &quot;unit of mock&quot; first.
+Remember the <code>struct foo</code> inside <code>mod FooMock</code>, the one that implements <code>MockFn</code>.
+Let's try to put a helper method in <code>MockFn</code>:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">mock</span><span>() -&gt; MockFnBuilder { .. }
+</span><span>}
+</span><span>
+</span><span>FooMock::foo::mock()
+</span><span>    .inputs(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>    .returns(</span><span style="color:#cf6a4c;">2</span><span>);
+</span></code></pre>
+<p>Even better:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">mock</span><span>(</span><span style="color:#ffb964;">matching</span><span>: impl MatchingFn) -&gt; MockFnBuilder&lt;</span><span style="color:#8fbfdc;">Self</span><span>&gt; { .. }
+</span><span>}
+</span><span>
+</span><span>FooMock::foo::mock(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>    .returns(</span><span style="color:#cf6a4c;">2</span><span>);
+</span></code></pre>
+<p>Even better (with the help of <code>rustfmt</code>):</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">MockFn </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">mock</span><span>(</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">matching</span><span>: impl MatchingFn) -&gt; MockFnBuilder&lt;</span><span style="color:#8fbfdc;">Self</span><span>&gt; { .. }
+</span><span>}
+</span><span>
+</span><span>FooMock::foo
+</span><span>    .mock(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>    .returns(</span><span style="color:#cf6a4c;">2</span><span>);
+</span></code></pre>
+<p>Integrating this into the universal mocker builder:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>MockBuilder::new()
+</span><span>    .mock(FooMock::foo
+</span><span>        .mock(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>        .returns(</span><span style="color:#cf6a4c;">2</span><span>)
+</span><span>    )
+</span><span>    .mock(..)
+</span><span>    .build()
+</span></code></pre>
+<p>It's a bit better than where we started, but not quite there.
+I still don't like the boilerplate-y <code>.mock</code> (or <code>.add</code>) call that's required here.
+Also there's a <code>.build()</code> call that's very Builder Pattern, and really doesn't convey anything.</p>
+<p>What I'd like is just <em>one function call</em> with one parameter that just returns the mocker.
+This can be done using an array!</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">struct </span><span style="color:#ffb964;">Mocker </span><span>{ .. }
+</span><span>
+</span><span style="color:#8fbfdc;">impl </span><span style="color:#ffb964;">Mocker </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">pub fn </span><span style="color:#fad07a;">new</span><span>(</span><span style="color:#ffb964;">configs</span><span>: impl IntoIterator&lt;Item = MockFnBuilder&lt;?&gt;&gt;) { .. }
+</span><span>}
+</span></code></pre>
+<p>Except that <code>MockFnBuilder</code> has to be a generic type because it needs to operate on the corresponding <code>MockFn</code>'s <code>Inputs</code> and <code>Response</code> types.</p>
+<p>So if we can't use that, maybe the <code>MockFnBuilder&lt;F: MockFn&gt;</code> can be converted to a <code>DynMockFnBuilder</code> before being passed to the array?
+That would still require one extra line per mock config:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>Mocker::new([
+</span><span>    FooMock::foo
+</span><span>        .mock(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>        .returns(</span><span style="color:#cf6a4c;">2</span><span>)
+</span><span>        .into_dyn() </span><span style="color:#888888;">// &lt;-- :(
+</span><span>])
+</span></code></pre>
+<p>Sometimes I wish that Rust could do implicit type conversion..</p>
+<p>But not today.
+What's nice about the array approach is that the genericity of each <code>MockFnBuilder&lt;T&gt;</code> ends with each <code>.into_dyn()</code>, and the compiler has an easier job because each array item has the same type (it has to!).
+The obvious &quot;solution&quot; to missing implicit type conversion is.. <em>tuples</em>.
+With tuples we'll end up with a big unique type for every unique mock configuration, the compiler will have a harder time, but this is Ergonomic (and elegant) API design!</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>Mocker::new((
+</span><span>    MockFoo::foo
+</span><span>        .mock(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>        .returns(</span><span style="color:#cf6a4c;">2</span><span>),
+</span><span>    MockBar::bar
+</span><span>        .mock(matching!(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">string</span><span style="color:#556633;">&quot;</span><span>))
+</span><span>        .returns(</span><span style="color:#cf6a4c;">3</span><span>),
+</span><span>))
+</span></code></pre>
+<p>I'm starting to like this!</p>
+<p>Now the problem is the corny grammars: &quot;Mock matching 1 returns 2&quot;.
+I think there's too much use of the word &quot;mock&quot; everywhere.</p>
+<p>To get a hint of what the helper function is going to be called, we can analyze the type-state in the mock builder:</p>
+<ol>
+<li><code>MockFoo::foo</code> a trait method</li>
+<li><code>.mock(matching!(something))</code> describe the function call</li>
+<li><code>.returns(something)</code> describe the response</li>
+</ol>
+<p>After step 2 we have described a function call, so the &quot;keyword&quot; could include the word &quot;call&quot;.
+In addition, it would be nice if it sounded as a general rule.
+&quot;Each time this function is called with these parameters, it should return this&quot;.
+<code>each_call</code> is nice.
+We'll also support <code>next_call</code> and <code>some_call</code> (the Unimock documentation explains the difference).</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>Mocker::new((
+</span><span>    MockFoo::foo
+</span><span>        .each_call(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>        .returns(</span><span style="color:#cf6a4c;">2</span><span>),
+</span><span>    MockBar::bar
+</span><span>        .next_call(matching!(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">string</span><span style="color:#556633;">&quot;</span><span>))
+</span><span>        .returns(</span><span style="color:#cf6a4c;">3</span><span>)
+</span><span>))
+</span></code></pre>
+<p>And what about <code>Mocker::new</code>?
+It needs to accept a generic with a trait bound as its only parameter.
+That trait will be called <code>Clause</code>, and must of course be implemented for tuples of up to N elements.
+Using a trait like this makes it easy to factor out common clauses to helper functions.
+As long is the trait is implemented for both tuples and the elements inside the tuples, it's possible to build arbitrarily deep clause trees.</p>
+<p>I think we have a good enough configuration API now, although all the details are not described here.
+These are (very roughly) the steps that were taken before the Unimock API ended up the way it looks now.</p>
+<h2 id="mock-the-ecosystem">Mock the ecosystem!</h2>
+<p>Unimock before 0.5 was intended to be used in application development for locally defined traits.
+I only recently came to think of rust traits as living inside a big interconnected graph.</p>
+<p>So unimock 0.5 introduces mocking of upstream crates from <a href="https://doc.rust-lang.org/stable/core/index.html">core</a> and <a href="https://doc.rust-lang.org/std/">std</a>.
+The most notable ones are <code>Display</code>, <code>Debug</code>, <code>Read</code>, <code>Write</code> and <code>Seek</code>.</p>
+<p>I'm not sure where to to take unimock next.
+Should unimock depend on all kinds of third party crates or should it be the other way around?
+It's not yet clear to me what's the ideal solution.</p>
+<p>I'll close off this post by posting a new fun test case from the repo, demonstrating how <code>Display</code> and <code>Write</code> works:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>use unimock::mock::core::fmt::DisplayMock;
+</span><span>use unimock::mock::std::io::WriteMock;
+</span><span>use unimock::*;
+</span><span>
+</span><span>#[</span><span style="color:#ffb964;">test</span><span>]
+</span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">test</span><span>() {
+</span><span>    </span><span style="color:#888888;">// All the clauses here use `next_call`
+</span><span>    </span><span style="color:#888888;">// and therefore MUST happen in the specified order:
+</span><span>    </span><span style="color:#8fbfdc;">let</span><span> mocker = Unimock::new((
+</span><span>        DisplayMock::fmt
+</span><span>            .next_call(matching!())
+</span><span>            .mutates(|</span><span style="color:#ffb964;">f</span><span>, _| write!(f, </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">hello </span><span style="color:#7697d6;">{}</span><span style="color:#556633;">&quot;</span><span>, </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">unimock</span><span style="color:#556633;">&quot;</span><span>)),
+</span><span>        </span><span style="color:#888888;">// NOTE: `write!` calls `write_all` which
+</span><span>        </span><span style="color:#888888;">// is a default method that implicitly
+</span><span>        </span><span style="color:#888888;">// gets re-routed into `write`:
+</span><span>        WriteMock::write
+</span><span>            .next_call(matching!(eq!(</span><span style="color:#8fbfdc;">b</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">hello </span><span style="color:#556633;">&quot;</span><span>)))
+</span><span>            .returns(Ok(</span><span style="color:#cf6a4c;">6</span><span>)),
+</span><span>        WriteMock::write
+</span><span>            .next_call(matching!(eq!(</span><span style="color:#8fbfdc;">b</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">unimock</span><span style="color:#556633;">&quot;</span><span>)))
+</span><span>            .returns(Ok(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">uni</span><span style="color:#556633;">&quot;</span><span>.len())),
+</span><span>        WriteMock::write
+</span><span>            .next_call(matching!(eq!(</span><span style="color:#8fbfdc;">b</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">mock</span><span style="color:#556633;">&quot;</span><span>)))
+</span><span>            .returns(Ok(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">mock</span><span style="color:#556633;">&quot;</span><span>.len())),
+</span><span>    ));
+</span><span>
+</span><span>    write!(&amp;mut mocker.clone(), </span><span style="color:#556633;">&quot;</span><span style="color:#7697d6;">{mocker}</span><span style="color:#556633;">&quot;</span><span>).unwrap();
+</span><span>}
+</span></code></pre>
+
+</article>
+
+    </main>
+    
+    <footer>
+        
+        &copy; 2024 Audun Halland
+        
+        
+    </footer>
+</body>
+
+</html>

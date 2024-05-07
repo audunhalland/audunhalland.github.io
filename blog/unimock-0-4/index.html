@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+<title>Unimock 0.4 - Audun Halland</title>
+
+    
+    <link rel="stylesheet" href="/css/simple.min.css">
+    
+    
+<style>
+pre code span {
+    color: #fff;
+}
+</style>
+
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    
+    
+    
+    
+</head>
+
+<body>
+    <header>
+        
+        <nav>
+            
+            <a href="&#x2F;blog&#x2F;">Blog</a>
+            
+            <a href="&#x2F;about&#x2F;">About</a>
+            
+            <a href="&#x2F;resume&#x2F;">Resume</a>
+            
+            <a href="https:&#x2F;&#x2F;github.com&#x2F;audunhalland">Github</a>
+            
+            <a href="https:&#x2F;&#x2F;mas.to&#x2F;@audunhalland">Mastodon</a>
+            
+        </nav>
+        
+        
+<h1>Unimock 0.4</h1>
+
+    </header>
+    
+    <main>
+        
+<article>
+    
+    <em>Published on: <time>27 Nov 2022</time></em>
+    
+    <p><a href="https://github.com/audunhalland/unimock">Unimock</a> (<a href="https://docs.rs/unimock/latest/unimock/">docs</a>) is a trait mocking library.
+Its defining feature is that all generated mock implementations are implemented for the same type (<a href="https://docs.rs/unimock/latest/unimock/struct.Unimock.html"><code>Unimock</code></a>).
+This design allows using a mock object where the type of the generic value is constrained by several trait bounds at the same time (e.g. <code>T: Foo + Bar</code>).</p>
+<p>Other features:</p>
+<ul>
+<li>Declarative verification of calls up front (executed at <code>drop</code>-time)</li>
+<li>Argument matching through pattern matching or <code>Eq</code></li>
+<li>Partial mocking (though this needs to be manually integrated with some &quot;canonical implementation&quot;)</li>
+<li>Versatile support for different types of return values, including borrowed values</li>
+<li>Largely implemented via generics, the macro expansions keep the size of generated code to an absolute minimum</li>
+<li>Safe Rust™</li>
+</ul>
+<h2 id="version-0-4">Version 0.4</h2>
+<p>Version 0.4 contains many improvements.
+First and foremost, it introduces more internal traits in order to expose a simpler yet more powerful API to end users.</p>
+<h3 id="mock-construction">Mock construction</h3>
+<p>There is now less boilerplate involved when instantiating a new mock object:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#8fbfdc;">let</span><span> unimock = Unimock::new((
+</span><span>    FooMock::foo
+</span><span>        .next_call(matching!(</span><span style="color:#cf6a4c;">1</span><span>))
+</span><span>        .returns(Some(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">string</span><span style="color:#556633;">&quot;</span><span>)),
+</span><span>    BarMock::bar
+</span><span>        .next_call(matching!(</span><span style="color:#cf6a4c;">2</span><span>))
+</span><span>        .returns(Ok(</span><span style="color:#cf6a4c;">42</span><span>)),
+</span><span>));
+</span></code></pre>
+<p><code>Unimock::new</code> accepts anything that implements <code>Clause</code>, which includes tuples up to 16 elements.
+This eliminates the manual type-erasure step needed in version 0.3 (having to call <code>.in_order()</code> on each terminal clause).
+There is a tradeoff though: Since the tuple elements all have different types, the compiler has to do more work.
+In this case I do think that improved ergonomics are worth it.</p>
+<h3 id="more-versatile-return-types">More versatile return types</h3>
+<p>In version 0.3, it wasn't possible to specify an output value for a function returning <code>-&gt; Option&lt;&amp;T&gt;</code>.
+This type is really a mix between an outer owned value and an inner borrowed value.</p>
+<p>Version 0.4 introduces new abstractions to be able to represent this.
+It includes specific support for <code>Option&lt;&amp;T&gt;</code> and <code>Result&lt;&amp;T, E&gt;</code>.
+The longer term plan is to be able to <code>#[derive]</code> these capabilities for custom user-defined types.</p>
+<p>Example:</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">unimock</span><span>(api = FooMock)]
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Foo </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">arg</span><span>: &amp;</span><span style="color:#8fbfdc;">str</span><span>) -&gt; Option&lt;&amp;String&gt;;
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">let</span><span> u = Unimock::new(
+</span><span>    FooMock::foo
+</span><span>        .next_call(matching!(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">a</span><span style="color:#556633;">&quot;</span><span>))
+</span><span>        .returns(Some(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">b</span><span style="color:#556633;">&quot;</span><span>.to_string()))
+</span><span>);
+</span></code></pre>
+<p>here, unimock automatically converts the <code>Option&lt;String&gt;</code> into an <code>Option&lt;&amp;String&gt;</code> internally.</p>
+<h3 id="improved-diagnostics-on-matching-failures">Improved diagnostics on matching! failures</h3>
+<p>Unimock will now try to diagnose what exactly went wrong when a mismatch happens.</p>
+<p>Example</p>
+<pre data-lang="rust" style="background-color:#151515;color:#e8e8d3;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#ffb964;">unimock</span><span>(api = FooMock)]
+</span><span style="color:#8fbfdc;">trait </span><span style="color:#ffb964;">Foo </span><span>{
+</span><span>    </span><span style="color:#8fbfdc;">fn </span><span style="color:#fad07a;">foo</span><span>(&amp;</span><span style="color:#ffb964;">self</span><span>, </span><span style="color:#ffb964;">arg</span><span>: &amp;</span><span style="color:#8fbfdc;">str</span><span>);
+</span><span>}
+</span><span>
+</span><span style="color:#8fbfdc;">let</span><span> u = Unimock::new(FooMock::foo.next_call(matching!(</span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">a</span><span style="color:#556633;">&quot;</span><span>)).returns(()));
+</span><span>
+</span><span>&lt;Unimock as Foo&gt;::foo(&amp;u, </span><span style="color:#556633;">&quot;</span><span style="color:#99ad6a;">b</span><span style="color:#556633;">&quot;</span><span>);
+</span></code></pre>
+<p>Running this code will produce the following terminal ouput:</p>
+<pre style="background-color:#151515;color:#e8e8d3;"><code><span>thread &#39;foo::mismatch&#39; panicked at &#39;Foo::foo(&quot;b&quot;): Method invoked in the correct order (1), but inputs didn&#39;t match Foo::foo(&quot;a&quot;) at tests/foo.rs:42. 
+</span><span>Pattern mismatch for input #0 (actual / expected):
+</span><span>Diff &lt; left / right &gt; :
+</span><span>&lt;&quot;b&quot;
+</span><span>&gt;&quot;a&quot;
+</span></code></pre>
+<p>Except only better:
+Unimock uses <a href="https://docs.rs/pretty_assertions/latest/pretty_assertions/">pretty_assertions</a> to write this diff to the terminal, so diffs are are actually printed with colored output.</p>
+<p>Note that the <code>matching!()</code> macro uses pattern matching by default.
+Printing a <code>Debug</code>-based diff on a pattern mismatch might not produce a good diff output, since patterns could be much smaller than the actuall value due to spreads or other variations in syntax.</p>
+<p><code>matching!()</code> now also supports matching using <code>Eq</code>!
+Just write <code>matching!(eq!(arg0), eq!(arg1))</code> to match against full values instead of patterns.
+If the values implement <code>Debug</code>, you will likely get a high quality diff.</p>
+<h3 id="gats-to-reduce-the-amount-of-generated-code">GATs to reduce the amount of generated code</h3>
+<p>Unimock uses a lot lifetime-generic data type abstractions.
+Although these constructs could be expressed in older versions of Rust,
+Generic Associated Types allow unimock to be much more compact,
+greatly reducing the amount of generated code.</p>
+<h3 id="other-changes">Other changes</h3>
+<p>See the <a href="https://github.com/audunhalland/unimock/blob/main/CHANGELOG.md#040---2022-11-20">unimock changelog</a> for other changes in 0.4.</p>
+<h2 id="the-future-of-unimock">The future of unimock</h2>
+<p>I intend to continue to support unimock, and attempt to actively dogfood it for internal projects at work as much as possible.</p>
+<p>Unimock is still a project in early development, and I continue to try and find use cases that demonstrate its potential shortcomings.</p>
+<p>A very recent experiment I did was to try and generate a mock implementation for <code>std::io::Read</code> (and <code>Write</code>).
+There I hit a new roadblock, because of the signature of <a href="https://doc.rust-lang.org/std/io/trait.Read.html#method.read_vectored"><code>Read::read_vectored</code></a>.
+In this signature, the object receives/borrows a parameter with an internal lifetime bound to <code>'self</code>.
+Unimock's traits aren't yet able to express this.</p>
+<p>Some more upcoming changes to core traits are to be expected, for unimock to be able to work with more interesting function signatures.</p>
+
+</article>
+
+    </main>
+    
+    <footer>
+        
+        &copy; 2024 Audun Halland
+        
+        
+    </footer>
+</body>
+
+</html>
