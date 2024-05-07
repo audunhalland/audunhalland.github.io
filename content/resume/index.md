@@ -53,3 +53,5 @@ Designed and implemented the high performance Asha Contacts application, includi
 - List view widget: Used for generically displaying menus in the UI. Optimised for fastest possible scroll frame rate, while still being fully dynamic and scriptable, in a constrained embedded environment
 - Part of completing the Majestic project, a feature phone approved for the South American market by Telefonica, powered by the Smarterphone Framework
 - Initiated process of version management migration from CVS to Git
+
+##### [2004 - 2007] BS, Computer Science/Logic/Linguistics - _University of Oslo_
